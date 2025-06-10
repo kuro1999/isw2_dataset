@@ -7,7 +7,7 @@ public class JiraIssue {
     public String fixVersion;
 
     // 1) Costruttore no-args per poter fare "new JiraIssue()"
-    public JiraIssue() { }
+    public JiraIssue() {}
 
     // 2) Il costruttore a 4 parametri che già hai (non toccarlo se va bene)
     public JiraIssue(String key, String summary, String status, String fixVersion) {

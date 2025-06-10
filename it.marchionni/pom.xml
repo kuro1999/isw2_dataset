@@ -23,23 +23,23 @@
             <version>4.11.0</version>
         </dependency>
 
-        <!-- Jackson Core + Databind -->
+        <!-- Jakarta JSON-B API -->
         <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <version>2.15.2</version>
+            <groupId>jakarta.json.bind</groupId>
+            <artifactId>jakarta.json.bind-api</artifactId>
+            <version>3.0.1</version>
         </dependency>
-        <!-- Jackson module per Java Time (Instant, ecc.) -->
+        <!-- Eclipse Yasson (JSON-B implementation) -->
         <dependency>
-            <groupId>com.fasterxml.jackson.datatype</groupId>
-            <artifactId>jackson-datatype-jsr310</artifactId>
-            <version>2.15.2</version>
+            <groupId>org.eclipse</groupId>
+            <artifactId>yasson</artifactId>
+            <version>3.0.4</version>
         </dependency>
     </dependencies>
 
     <build>
         <plugins>
-            <!-- 1) Shade: costruisce un JAR “tutto incluso” -->
+            <!-- Shade: costruisce un JAR “tutto incluso” -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -60,7 +60,7 @@
                 </executions>
             </plugin>
 
-            <!-- 2) Compiler: conferma Java 11 -->
+            <!-- Compiler: conferma Java 11 -->
             <plugin>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.8.1</version>
@@ -71,7 +71,7 @@
                 </configuration>
             </plugin>
 
-            <!-- 3) Exec: per eseguire con `mvn exec:java` -->
+            <!-- Exec: per eseguire con `mvn exec:java` -->
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>

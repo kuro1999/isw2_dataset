@@ -1,0 +1,5 @@
+dataset/creation/fetcher/model/JiraIssue.class
+dataset/creation/fetcher/BookkeeperFetcher.class
+dataset/creation/fetcher/model/Release.class
+dataset/creation/Main.class
+dataset/creation/fetcher/BookkeeperFetcher$1.class

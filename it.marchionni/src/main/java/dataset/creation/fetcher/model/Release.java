@@ -41,12 +41,18 @@ public class Release {
     }
 
     /* ------------------------ getter / setter --------------------------- */
-    public int       getId()          { return id; }
-    public void      setId(int id)    { this.id = id; }
+    public int getId() { return id; }
+    public void setId(int id) { this.id = id; }
 
-    public String    getTag()         { return tag; }
+    // Mappiamo `tag` su JSON come proprietà "name"
+    @JsonbProperty("name")
+    public String getTag() { return tag; }
+    @JsonbProperty("name")
+    public void setTag(String tag) { this.tag = tag; }
+
     public LocalDate getReleaseDate() { return releaseDate; }
+    public void setReleaseDate(LocalDate releaseDate) { this.releaseDate = releaseDate; }
 
     /* opzionale: nome “umano” se lo usi altrove */
-    public String getReleaseName()    { return tag; }
+    public String getReleaseName() { return tag; }
 }

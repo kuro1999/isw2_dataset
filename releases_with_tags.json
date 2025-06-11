@@ -2,29 +2,29 @@
     {
         "commitCount": 0,
         "id": 0,
+        "name": "release-4.0.0",
         "releaseDate": "2011-12-02",
-        "releaseName": "release-4.0.0",
-        "tag": "release-4.0.0"
+        "releaseName": "release-4.0.0"
     },
     {
         "commitCount": 0,
         "id": 0,
+        "name": "release-4.1.0",
         "releaseDate": "2012-06-07",
-        "releaseName": "release-4.1.0",
-        "tag": "release-4.1.0"
+        "releaseName": "release-4.1.0"
     },
     {
         "commitCount": 0,
         "id": 0,
+        "name": "release-4.2.0",
         "releaseDate": "2013-01-14",
-        "releaseName": "release-4.2.0",
-        "tag": "release-4.2.0"
+        "releaseName": "release-4.2.0"
     },
     {
         "commitCount": 0,
         "id": 0,
+        "name": "release-4.2.1",
         "releaseDate": "2013-02-19",
-        "releaseName": "release-4.2.1",
-        "tag": "release-4.2.1"
+        "releaseName": "release-4.2.1"
     }
 ]

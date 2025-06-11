@@ -16,6 +16,19 @@
     </properties>
 
     <dependencies>
+        <!-- pom.xml -->
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>1.7.36</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit</artifactId>
+            <version>6.9.0.202403050737-r</version>
+        </dependency>
         <!-- HTTP client -->
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>

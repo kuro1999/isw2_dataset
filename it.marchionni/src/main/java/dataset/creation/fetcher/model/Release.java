@@ -1,52 +1,52 @@
 package dataset.creation.fetcher.model;
 
 import jakarta.json.bind.annotation.JsonbProperty;
+import jakarta.json.bind.annotation.JsonbTransient;
+
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 public class Release {
 
-    @JsonbProperty("tag_name")
-    private String tagName;
+    /* ------------------------ campi serializzati ------------------------ */
+    private int       id;           // viene settato in GitInjection
+    private String    tag;
+    private LocalDate releaseDate;
 
-    @JsonbProperty("published_at")
-    private Instant publishedAt;
+    /* ------------------------ campi NON serializzati ------------------- */
+    @JsonbTransient                  // evitiamo JSON giganteschi / ricorsioni
+    private final List<Commit> commitList = new ArrayList<>();
 
-    /** Costruttore no-args richiesto da Jackson */
-    public Release() { }
+    /* ------------------------ costruttori ------------------------------ */
+    public Release() {}   // richiesto da JSON-B
 
-    /**
-     * Costruttore completo.
-     * @param tagName nome del tag (es. "v4.15.0")
-     * @param publishedAt data di pubblicazione
-     */
-    public Release(String tagName, Instant publishedAt) {
-        this.tagName = tagName;
-        this.publishedAt = publishedAt;
+    public Release(String tag, Instant publishedAt) {
+        this.tag         = tag;
+        this.releaseDate = publishedAt.atZone(ZoneOffset.UTC).toLocalDate();
     }
 
-    // --- getters e setters ---
+    /* ------------------------ API helper ------------------------------- */
+    public void addCommit(Commit c) { commitList.add(c); }
 
-    public String getTagName() {
-        return tagName;
+    @JsonbProperty("commitCount")    // <-- apparirà nel JSON
+    public int getCommitCount() { return commitList.size(); }
+
+    /* getter della lista per uso interno (NON in JSON) */
+    public List<Commit> getCommitList() {
+        return Collections.unmodifiableList(commitList);
     }
 
-    public void setTagName(String tagName) {
-        this.tagName = tagName;
-    }
+    /* ------------------------ getter / setter --------------------------- */
+    public int       getId()          { return id; }
+    public void      setId(int id)    { this.id = id; }
 
-    public Instant getPublishedAt() {
-        return publishedAt;
-    }
+    public String    getTag()         { return tag; }
+    public LocalDate getReleaseDate() { return releaseDate; }
 
-    public void setPublishedAt(Instant publishedAt) {
-        this.publishedAt = publishedAt;
-    }
-
-    @Override
-    public String toString() {
-        return "Release{" +
-                "tagName='" + tagName + '\'' +
-                ", publishedAt=" + publishedAt +
-                '}';
-    }
+    /* opzionale: nome “umano” se lo usi altrove */
+    public String getReleaseName()    { return tag; }
 }

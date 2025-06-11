@@ -2,20 +2,37 @@ package dataset.creation.fetcher.model;
 
 import java.time.LocalDate;
 
+/**
+ * Rappresenta una versione JIRA con
+ *  - id numerico interno
+ *  - nome (es. "4.14.0")
+ *  - data di rilascio
+ *
+ *  Servono i setter perché il parsing JSON-B (e il tuo
+ *  JiraInjection.java) li usa per iniettare i valori.
+ */
 public class JiraVersion {
-    private int id;
-    private String name;
+
+    /* ---------- campi ---------- */
+    private int       id;
+    private String    name;
     private LocalDate releaseDate;
 
-    public JiraVersion() { }
+    /* ---------- costruttori ---------- */
+    public JiraVersion() { }   // richiesto da JSON-B
 
     public JiraVersion(String name, LocalDate releaseDate) {
-        this.name = name;
+        this.name        = name;
         this.releaseDate = releaseDate;
     }
 
-    // getters & setters
+    public JiraVersion(int id, String name, LocalDate releaseDate) {
+        this.id          = id;
+        this.name        = name;
+        this.releaseDate = releaseDate;
+    }
 
+    /* ---------- getter / setter ---------- */
     public int getId() { return id; }
     public void setId(int id) { this.id = id; }
 
@@ -25,4 +42,3 @@ public class JiraVersion {
     public LocalDate getReleaseDate() { return releaseDate; }
     public void setReleaseDate(LocalDate releaseDate) { this.releaseDate = releaseDate; }
 }
-

@@ -48,6 +48,21 @@
             <artifactId>yasson</artifactId>
             <version>3.0.4</version>
         </dependency>
+
+        <!-- JavaParser per il parsing AST e metriche base -->
+        <dependency>
+            <groupId>com.github.javaparser</groupId>
+            <artifactId>javaparser-core</artifactId>
+            <version>3.25.4</version>
+        </dependency>
+
+        <!-- CK (Cognitive & Cyclomatic Complexity) -->
+        <dependency>
+            <groupId>com.github.mauricioaniche</groupId>
+            <artifactId>ck</artifactId>
+            <version>0.7.0</version>
+        </dependency>
+
     </dependencies>
 
     <build>

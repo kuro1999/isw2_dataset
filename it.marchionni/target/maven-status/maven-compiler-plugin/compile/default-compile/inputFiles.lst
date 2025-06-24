@@ -1,8 +1,13 @@
 /home/edo/isw2/dataset/it.marchionni/src/main/java/dataset/creation/Main.java
+/home/edo/isw2/dataset/it.marchionni/src/main/java/dataset/creation/features/FeatureExtractor.java
+/home/edo/isw2/dataset/it.marchionni/src/main/java/dataset/creation/features/BuggyMethodExtractor.java
+/home/edo/isw2/dataset/it.marchionni/src/main/java/dataset/creation/fetcher/GitInjection.java
+/home/edo/isw2/dataset/it.marchionni/src/main/java/dataset/creation/fetcher/BookkeeperFetcher.java
+/home/edo/isw2/dataset/it.marchionni/src/main/java/dataset/creation/features/CsvGenerator.java
+/home/edo/isw2/dataset/it.marchionni/src/main/java/dataset/creation/fetcher/model/Commit.java
 /home/edo/isw2/dataset/it.marchionni/src/main/java/dataset/creation/fetcher/model/JiraIssue.java
 /home/edo/isw2/dataset/it.marchionni/src/main/java/dataset/creation/utils/InstantAdapter.java
 /home/edo/isw2/dataset/it.marchionni/src/main/java/dataset/creation/fetcher/model/Release.java
 /home/edo/isw2/dataset/it.marchionni/src/main/java/dataset/creation/fetcher/JiraInjection.java
 /home/edo/isw2/dataset/it.marchionni/src/main/java/dataset/creation/fetcher/model/JiraVersion.java
-/home/edo/isw2/dataset/it.marchionni/src/main/java/dataset/creation/fetcher/BookkeeperFetcher.java
 /home/edo/isw2/dataset/it.marchionni/src/main/java/dataset/creation/fetcher/model/JiraTicket.java

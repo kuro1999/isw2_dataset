@@ -3,115 +3,117 @@ package dataset.creation.features;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.MethodDeclaration;
-import com.github.javaparser.ast.stmt.*;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
+
+import net.sourceforge.pmd.PMDConfiguration;
+import net.sourceforge.pmd.Report;
+import net.sourceforge.pmd.RuleContext;
+import net.sourceforge.pmd.RuleSetFactory;
+import net.sourceforge.pmd.RuleSets;
+import net.sourceforge.pmd.SourceCodeProcessor;
+import net.sourceforge.pmd.lang.LanguageRegistry;
+import net.sourceforge.pmd.lang.java.JavaLanguageModule;
+import net.sourceforge.pmd.util.datasource.FileDataSource;
+
 import java.io.File;
-import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Estrae le feature essenziali da un file .java:
+ * Estrae le feature essenziali da un file .java, tra cui:
  *  - MethodLength
  *  - ParameterCount
  *  - NestingDepth
  *  - DecisionPoints
- *  - CyclomaticComplexity = decisionPoints + 1
- *  - CognitiveComplexity  = decisionPoints (proxy semplice)
- *  - CodeSmells = 0 (placeholder)
+ *  - CyclomaticComplexity
+ *  - CognitiveComplexity
+ *  - CodeSmells (PMD 6.55 violations)
  */
 public class FeatureExtractor {
 
-    public Map<String, MethodFeatures> extractFromFile(File javaFile) throws IOException {
+    public Map<String, MethodFeatures> extractFromFile(File javaFile) throws Exception {
+
+        /* ------------------------------------------------------------------
+           0) Code Smells via PMD 6.55.0 (SourceCodeProcessor)
+           ------------------------------------------------------------------ */
+        PMDConfiguration cfg = new PMDConfiguration();
+        cfg.setDefaultLanguageVersion(
+                LanguageRegistry.getLanguage(JavaLanguageModule.NAME).getDefaultVersion());
+
+        // carichiamo un ruleset di esempio; cambialo o aggiungine altri se vuoi
+        RuleSetFactory rsf = new RuleSetFactory();
+        RuleSets ruleSets  = rsf.createRuleSets("category/java/bestpractices.xml");
+
+        RuleContext ctx = new RuleContext();
+        ctx.setSourceCodeFilename(javaFile.getAbsolutePath());
+        Report report = new Report();
+        ctx.setReport(report);
+
+        new SourceCodeProcessor(cfg)             // ► OPZIONE 1: InputStream
+                .processSourceCode(new java.io.FileInputStream(javaFile), ruleSets, ctx);        int codeSmellsCount = report.getViolations().size();
+
+        /* ------------------------------------------------------------------
+           1) Analisi AST con JavaParser per le altre metriche
+           ------------------------------------------------------------------ */
         CompilationUnit cu = StaticJavaParser.parse(javaFile);
-        Map<String, MethodFeatures> result = new HashMap<>();
+        Map<String, MethodFeatures> map = new HashMap<>();
 
         for (MethodDeclaration md : cu.findAll(MethodDeclaration.class)) {
             MethodFeatures f = new MethodFeatures();
 
-            // 1) MethodLength (linee)
             int begin = md.getBegin().map(p -> p.line).orElse(0);
-            int end   = md.getEnd().  map(p -> p.line).orElse(begin);
-            f.methodLength = end - begin + 1;
-
-            // 2) ParameterCount
+            int end   = md.getEnd()  .map(p -> p.line).orElse(begin);
+            f.methodLength   = end - begin + 1;
             f.parameterCount = md.getParameters().size();
 
-            // 3) NestingDepth & DecisionPoints
             DepthVisitor dv = new DepthVisitor();
             dv.visit(md, 0);
-            f.nestingDepth   = dv.max;
-            f.decisionPoints = dv.decisionPoints;
-
-            // 4) CyclomaticComplexity = decisionPoints + 1
-            f.cyclomaticComplexity = f.decisionPoints + 1;
-
-            // 5) CognitiveComplexity = decisionPoints (proxy)
+            f.nestingDepth        = dv.maxDepth;
+            f.decisionPoints      = dv.decisionPoints;
+            f.cyclomaticComplexity= f.decisionPoints + 1;
             f.cognitiveComplexity = f.decisionPoints;
 
-            // 6) CodeSmells = 0 (da integrare in seguito)
-            f.codeSmells = 0;
+            f.codeSmells = codeSmellsCount;
 
-            // identificatore univoco del metodo
             String sig = md.getDeclarationAsString(false, false, false);
-            result.put(sig, f);
+            map.put(sig, f);
         }
-        return result;
+        return map;
     }
 
-    /** Visitor che conta nesting depth e decision points */
+    /* ---------------- helper per Nesting Depth & Decision Points ---------- */
     private static class DepthVisitor extends VoidVisitorAdapter<Integer> {
-        int max = 0;
-        int decisionPoints = 0;
+        int maxDepth = 0, decisionPoints = 0;
 
-        @Override
-        public void visit(IfStmt n, Integer depth) {
-            super.visit(n, depth);
-            decisionPoints++;
-            int nd = depth + 1;
-            max = Math.max(max, nd);
+        @Override public void visit(com.github.javaparser.ast.stmt.IfStmt n, Integer d) {
+            super.visit(n, d);
+            decisionPoints++; int nd = d + 1; maxDepth = Math.max(maxDepth, nd);
             n.getThenStmt().accept(this, nd);
             n.getElseStmt().ifPresent(e -> e.accept(this, nd));
         }
-
-        @Override
-        public void visit(ForStmt n, Integer depth) {
-            super.visit(n, depth);
-            decisionPoints++;
-            int nd = depth + 1;
-            max = Math.max(max, nd);
+        @Override public void visit(com.github.javaparser.ast.stmt.ForStmt n, Integer d) {
+            super.visit(n, d);
+            decisionPoints++; int nd = d + 1; maxDepth = Math.max(maxDepth, nd);
             n.getBody().accept(this, nd);
         }
-
-        @Override
-        public void visit(WhileStmt n, Integer depth) {
-            super.visit(n, depth);
-            decisionPoints++;
-            int nd = depth + 1;
-            max = Math.max(max, nd);
+        @Override public void visit(com.github.javaparser.ast.stmt.WhileStmt n, Integer d) {
+            super.visit(n, d);
+            decisionPoints++; int nd = d + 1; maxDepth = Math.max(maxDepth, nd);
             n.getBody().accept(this, nd);
         }
-
-        @Override
-        public void visit(DoStmt n, Integer depth) {
-            super.visit(n, depth);
-            decisionPoints++;
-            int nd = depth + 1;
-            max = Math.max(max, nd);
+        @Override public void visit(com.github.javaparser.ast.stmt.DoStmt n, Integer d) {
+            super.visit(n, d);
+            decisionPoints++; int nd = d + 1; maxDepth = Math.max(maxDepth, nd);
             n.getBody().accept(this, nd);
         }
-
-        @Override
-        public void visit(SwitchEntry n, Integer depth) {
-            super.visit(n, depth);
-            decisionPoints++;
-            int nd = depth + 1;
-            max = Math.max(max, nd);
+        @Override public void visit(com.github.javaparser.ast.stmt.SwitchEntry n, Integer d) {
+            super.visit(n, d);
+            decisionPoints++; int nd = d + 1; maxDepth = Math.max(maxDepth, nd);
             n.getStatements().forEach(s -> s.accept(this, nd));
         }
     }
 
-    /** DTO per le feature di un metodo */
+    /* ---------------- DTO ---------------- */
     public static class MethodFeatures {
         public int methodLength;
         public int parameterCount;

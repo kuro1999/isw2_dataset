@@ -24,16 +24,23 @@ public class BuggyMethodExtractor {
 
     private static final Logger logger = LoggerFactory.getLogger(BuggyMethodExtractor.class);
 
+    /** Risultato composto: set di metodi buggy + mappa methodId → priority */
+    public static class BuggyInfo {
+        public final Set<String> buggyMethods;
+        public BuggyInfo(Set<String> b, Map<String,String> p){ buggyMethods=b; }
+    }
+
     /**
-     * @param repoDir directory radice del repo Git (contiene .git/)
-     * @param tickets lista di JiraTicket da cui calcolare i fix
-     * @return insieme di methodId (“FileName.java#methodSignature”) etichettati buggy
+     * @param repoDir  directory radice del repo Git (contiene .git/)
+     * @param tickets  lista di JiraTicket
+     * @return BuggyInfo con metodi buggy e priority
      */
-    public static Set<String> computeBuggyMethods(
+    public static BuggyInfo computeBuggyMethods(
             File repoDir,
             List<JiraTicket> tickets
     ) throws Exception {
-        // 1) apri il repository
+
+        /* ---------- 1. Apri repo ----------- */
         Repository repository = new FileRepositoryBuilder()
                 .setGitDir(new File(repoDir, ".git"))
                 .readEnvironment()
@@ -41,48 +48,52 @@ public class BuggyMethodExtractor {
                 .build();
         Git git = new Git(repository);
 
-        // 2) individua tutti i ticket con resolution=Fixed e status Closed/Resolved
-        Set<String> defectKeys = new HashSet<>();
+        /* ---------- 2. Ticket “Fixed” ----------- */
+        Map<String,String> keyToPriority = new HashMap<>();
         for (JiraTicket t : tickets) {
             if ("Fixed".equalsIgnoreCase(t.getResolution())
                     && ("Closed".equalsIgnoreCase(t.getStatus())
                     || "Resolved".equalsIgnoreCase(t.getStatus()))) {
-                defectKeys.add(t.getKey());
+                keyToPriority.put(t.getKey(), t.getPriority());  // key → priority string
             }
         }
-        logger.info("» Totale ticket con resolution=Fixed & Closed/Resolved: {}", defectKeys.size());
+        logger.info("» Ticket fix rilevati: {}", keyToPriority.size());
 
-        // 3) trova i commit che menzionano queste key
-        Set<ObjectId> fixCommits = new HashSet<>();
+        /* ---------- 3. Commit che citano i ticket ----------- */
+        Map<ObjectId,String> commitToPriority = new HashMap<>();
         for (RevCommit c : git.log().call()) {
             String msg = c.getFullMessage();
-            for (String key : defectKeys) {
-                if (msg.contains(key)) {
-                    fixCommits.add(c.getId());
+            for (Map.Entry<String,String> e : keyToPriority.entrySet()) {
+                if (msg.contains(e.getKey())) {
+                    commitToPriority.put(c.getId(), e.getValue());
                     break;
                 }
             }
         }
-        logger.info("» Trovati {} commit che menzionano ticket Fixed", fixCommits.size());
+        logger.info("» Commit di fix trovati: {}", commitToPriority.size());
 
-        // 4) per ciascun fix commit, diff e raccolta methodId cambiati
+        /* ---------- 4. Diff e raccolta metodi buggy ----------- */
         Set<String> buggyMethods = new HashSet<>();
+        Map<String,String> prioOfMethod = new HashMap<>();
+
         DiffFormatter df = new DiffFormatter(DisabledOutputStream.INSTANCE);
         df.setRepository(repository);
         df.setDiffComparator(RawTextComparator.DEFAULT);
         df.setDetectRenames(true);
 
-        for (ObjectId cid : fixCommits) {
-            try (RevWalk revWalk = new RevWalk(repository)) {
-                RevCommit commit = revWalk.parseCommit(cid);
+        for (Map.Entry<ObjectId,String> entry : commitToPriority.entrySet()) {
+            ObjectId cid   = entry.getKey();
+            String   prio  = entry.getValue();
+
+            try (RevWalk rw = new RevWalk(repository)) {
+                RevCommit commit = rw.parseCommit(cid);
                 if (commit.getParentCount() == 0) continue;
-                RevCommit parent = revWalk.parseCommit(commit.getParent(0).getId());
+                RevCommit parent = rw.parseCommit(commit.getParent(0).getId());
 
                 AbstractTreeIterator pt = prepareTree(repository, parent);
                 AbstractTreeIterator ct = prepareTree(repository, commit);
 
-                List<DiffEntry> diffs = df.scan(pt, ct);
-                for (DiffEntry diff : diffs) {
+                for (DiffEntry diff : df.scan(pt, ct)) {
                     if (diff.getChangeType() != DiffEntry.ChangeType.MODIFY) continue;
                     String path = diff.getNewPath();
                     if (!path.endsWith(".java")) continue;
@@ -92,9 +103,8 @@ public class BuggyMethodExtractor {
                     CompilationUnit cu = StaticJavaParser.parse(src);
 
                     FileHeader fh = df.toFileHeader(diff);
-                    EditList edits = fh.toEditList();
                     Set<Integer> changed = new HashSet<>();
-                    for (Edit e : edits)
+                    for (Edit e : fh.toEditList())
                         for (int ln = e.getBeginB(); ln < e.getEndB(); ln++)
                             changed.add(ln + 1);
 
@@ -105,7 +115,9 @@ public class BuggyMethodExtractor {
                                 if (ln >= b && ln <= eLine) {
                                     String fileName = path.substring(path.lastIndexOf('/') + 1);
                                     String sig = md.getDeclarationAsString(false, false, false);
-                                    buggyMethods.add(fileName + "#" + sig);
+                                    String id  = fileName + "#" + sig;
+                                    buggyMethods.add(id);
+                                    prioOfMethod.put(id, prio);        // salva priority
                                     break;
                                 }
                             }
@@ -117,10 +129,10 @@ public class BuggyMethodExtractor {
 
         df.close();
         repository.close();
-        return buggyMethods;
+        return new BuggyInfo(buggyMethods, prioOfMethod);
     }
 
-    /** Helper: prepara un TreeIterator per un RevCommit */
+    /* Helper: TreeIterator per un RevCommit */
     private static AbstractTreeIterator prepareTree(Repository repo, RevCommit commit) throws Exception {
         try (RevWalk rw = new RevWalk(repo)) {
             RevTree tree = rw.parseTree(commit.getTree().getId());

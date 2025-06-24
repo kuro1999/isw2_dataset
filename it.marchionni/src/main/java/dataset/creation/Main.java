@@ -4,6 +4,7 @@ import dataset.creation.fetcher.BookkeeperFetcher;
 import dataset.creation.fetcher.model.JiraTicket;
 import dataset.creation.features.FeatureExtractor;
 import dataset.creation.features.BuggyMethodExtractor;
+import dataset.creation.features.BuggyMethodExtractor.BuggyInfo;
 import dataset.creation.features.CsvGenerator;
 import jakarta.json.bind.Jsonb;
 import jakarta.json.bind.JsonbBuilder;
@@ -14,9 +15,7 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.Reader;
 import java.lang.reflect.Type;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Stream;
 
@@ -27,81 +26,68 @@ public class Main {
     public static void main(String[] args) throws Exception {
         logger.info("Avvio del processo di esportazione e creazione del dataset");
 
-        // 1) JSON dei ticket JIRA
+        /* ------------ 1. Ticket JIRA (load o download) ------------ */
         String jsonFileName = "bookkeeper_jira_tickets.json";
         Path   jsonPath     = Paths.get(jsonFileName);
 
-        // JSON-B per (de)serializzare la lista di ticket
         Jsonb jsonb = JsonbBuilder.create(new JsonbConfig().withFormatting(true));
-
-        // 2) Carica o scarica i ticket
         List<JiraTicket> tickets;
+
         if (Files.exists(jsonPath)) {
             logger.info("Trovato {}: carico i ticket da file", jsonFileName);
             try (Reader r = Files.newBufferedReader(jsonPath)) {
-                Type listType = new ArrayList<JiraTicket>() { }
-                        .getClass()
-                        .getGenericSuperclass();
+                Type listType = new ArrayList<JiraTicket>(){}.getClass().getGenericSuperclass();
                 tickets = jsonb.fromJson(r, listType);
             }
-            logger.info("Caricati {} ticket da JSON", tickets.size());
         } else {
-            logger.info("File {} non trovato: scarico i ticket da JIRA...", jsonFileName);
+            logger.info("File {} non trovato: scarico da JIRA…", jsonFileName);
             String jiraUser = System.getenv("JIRA_USER");
             String jiraPass = System.getenv("JIRA_PASS");
-            logger.info("Credenziali JIRA presenti: user={} pass={}", jiraUser != null, jiraPass != null);
 
             BookkeeperFetcher fetcher = new BookkeeperFetcher();
-            long start = System.nanoTime();
             tickets = fetcher.fetchAllJiraTickets(jiraUser, jiraPass);
-            double elapsedSec = (System.nanoTime() - start) / 1_000_000_000.0;
-            logger.info("Download completato: {} ticket in {}s", tickets.size(), String.format("%.2f", elapsedSec));
-
-            // salva su disco
-            logger.info("Scrivo JSON su {}...", jsonFileName);
             fetcher.writeTicketsToJsonFile(tickets, jsonFileName);
         }
+        logger.info("Caricati {} ticket", tickets.size());
 
-        // 3) Usa la tua copia locale di BookKeeper (senza riscaricare)
+        /* ------------ 2. Repo locale BookKeeper ------------ */
         File bkRepo = new File("/home/edo/isw2/bookkeeper_isw2");
-        if (!bkRepo.exists() || !bkRepo.isDirectory()) {
-            logger.error("Directory del repo BookKeeper non trovata: {}", bkRepo.getPath());
-            System.err.println("Errore: directory del repo BookKeeper non trovata: " + bkRepo.getPath());
+        if (!bkRepo.isDirectory()) {
+            logger.error("Repo BookKeeper non trovato: {}", bkRepo.getPath());
             return;
-        } else {
-            logger.info("Usando il repo BookKeeper locale: {}", bkRepo.getPath());
         }
 
-        // 4) Estrai feature da tutti i .java del repo BookKeeper
-        logger.info("Estraggo le feature dai sorgenti di BookKeeper…");
+        /* ------------ 3. Estrazione feature sorgenti ------------ */
+        logger.info("Estraggo feature dai sorgenti BookKeeper…");
         FeatureExtractor extractor = new FeatureExtractor();
         Map<File, Map<String, FeatureExtractor.MethodFeatures>> allFeatures = new HashMap<>();
 
         try (Stream<Path> paths = Files.walk(bkRepo.toPath())) {
             paths.filter(p -> p.toString().endsWith(".java"))
+                    .filter(p -> p.toString().contains("/src/main/java/"))
                     .map(Path::toFile)
                     .forEach(file -> {
-                        try {
-                            allFeatures.put(file, extractor.extractFromFile(file));
-                        } catch (Exception e) {
-                            logger.error("Errore parsing {}: {}", file, e.getMessage());
-                        }
+                        try { allFeatures.put(file, extractor.extractFromFile(file)); }
+                        catch (Exception ex) { logger.error("Parse {}: {}", file, ex.getMessage()); }
                     });
         }
         logger.info("Feature estratte per {} file", allFeatures.size());
 
-        // 5) Identifica i methodId buggy dai commit di fix
-        logger.info("Identifico i metodi buggy dai commit di fix…");
-        Set<String> buggyMethods = BuggyMethodExtractor.computeBuggyMethods(bkRepo, tickets);
-        logger.info("Trovati {} metodi buggy", buggyMethods.size());
+        /* ------------ 4. Metodi buggy + priority ------------ */
+        logger.info("Identifico metodi buggy dai commit di fix…");
+        BuggyInfo bugInfo = BuggyMethodExtractor.computeBuggyMethods(bkRepo, tickets);
+        logger.info("Trovati {} metodi buggy", bugInfo.buggyMethods.size());
 
-        // 6) Genera il CSV in formato “professore-style”
+        /* ------------ 5. CSV finale ------------ */
         String csvFile = "dataset_bookkeeper.csv";
-        logger.info("Genero CSV su {} …", csvFile);
-        int datasetVersion = 1;
-        new CsvGenerator(datasetVersion)
-                .generateCsv(allFeatures, buggyMethods, csvFile);
-
+        new CsvGenerator(1).generateCsv(allFeatures, bugInfo, csvFile);
         logger.info("✨ Dataset creato: {}", csvFile);
+
+        /* ------------ 6. Statistica code-smells ------------ */
+        int totalSmells = allFeatures.values().stream()
+                .flatMap(m -> m.values().stream())
+                .mapToInt(f -> f.codeSmells)
+                .sum();
+        logger.info("⚠️  Code smells totali rilevati: {}", totalSmells);
     }
 }

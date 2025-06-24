@@ -5,71 +5,53 @@ import org.apache.commons.csv.CSVPrinter;
 
 import java.io.File;
 import java.io.FileWriter;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * Genera un CSV “professore-style” con:
+ * Genera il CSV finale con tutte le metriche richieste.
+ * Colonne:
  *   Version,File Name,Method Name,
  *   LOC,CognitiveComplexity,CyclomaticComplexity,
- *   CodeSmells,NestingDepth,ParameterCount,
- *   DecisionPoints,Buggy
+ *   CodeSmells,NestingDepth,ParameterCount,DecisionPoints,
+ *   Priority,Buggy
  */
 public class CsvGenerator {
 
     private final int version;
+    public CsvGenerator(int version) { this.version = version; }
 
-    /**
-     * @param version numero di versione da scrivere nella colonna "Version"
-     */
-    public CsvGenerator(int version) {
-        this.version = version;
-    }
-
-    /**
-     * @param featuresPerFile mappa file → (mappa methodId→feature)
-     * @param buggyMethods    insieme di methodId considerati buggy
-     * @param outputCsv       path del file di output
-     */
+    /** @param featuresPerFile  file → (methodId → feature)
+     *  @param info              insieme metodi buggy + priority per metodo
+     *  @param outputCsv         path del CSV in uscita */
     public void generateCsv(
             Map<File, Map<String, FeatureExtractor.MethodFeatures>> featuresPerFile,
-            Set<String> buggyMethods,
-            String outputCsv
-    ) throws Exception {
-        try (CSVPrinter printer = new CSVPrinter(
+            BuggyMethodExtractor.BuggyInfo info,
+            String outputCsv) throws Exception {
+
+        try (CSVPrinter csv = new CSVPrinter(
                 new FileWriter(outputCsv),
-                CSVFormat.DEFAULT
-                        .withHeader(
-                                "Version",
-                                "File Name",
-                                "Method Name",
-                                "LOC",
-                                "CognitiveComplexity",
-                                "CyclomaticComplexity",
-                                "CodeSmells",
-                                "NestingDepth",
-                                "ParameterCount",
-                                "DecisionPoints",
-                                "Buggy"
-                        )
-        )) {
-            for (Map.Entry<File, Map<String, FeatureExtractor.MethodFeatures>> entry : featuresPerFile.entrySet()) {
-                String fileName = entry.getKey().getName();
-                for (Map.Entry<String, FeatureExtractor.MethodFeatures> me : entry.getValue().entrySet()) {
-                    String methodId = me.getKey(); // es. "void foo(int)"
-                    FeatureExtractor.MethodFeatures f = me.getValue();
+                CSVFormat.DEFAULT.withHeader(
+                        "Version","File Name","Method Name",
+                        "LOC","CognitiveComplexity","CyclomaticComplexity",
+                        "CodeSmells","NestingDepth","ParameterCount","DecisionPoints","Buggy"))) {
 
-                    // split methodId in Method Name
-                    String methodName = methodId;
+            Set<String> buggy = info.buggyMethods;
 
-                    // label come Yes/No
-                    String buggy = buggyMethods.contains(fileName + "#" + methodId) ? "Yes" : "No";
+            for (Map.Entry<File, Map<String, FeatureExtractor.MethodFeatures>> e : featuresPerFile.entrySet()) {
+                String fileName = e.getKey().getName();
 
-                    printer.printRecord(
+                for (Map.Entry<String, FeatureExtractor.MethodFeatures> m : e.getValue().entrySet()) {
+                    String methodSig = m.getKey();                         // es. "void foo(int)"
+                    String methodId   = fileName + "#" + methodSig;        // chiave globale
+
+                    FeatureExtractor.MethodFeatures f = m.getValue();
+                    boolean isBuggy = buggy.contains(methodId);
+
+                    csv.printRecord(
                             version,
                             fileName,
-                            methodName,
+                            methodSig,
                             f.methodLength,
                             f.cognitiveComplexity,
                             f.cyclomaticComplexity,
@@ -77,7 +59,7 @@ public class CsvGenerator {
                             f.nestingDepth,
                             f.parameterCount,
                             f.decisionPoints,
-                            buggy
+                            isBuggy ? "Yes" : "No"
                     );
                 }
             }

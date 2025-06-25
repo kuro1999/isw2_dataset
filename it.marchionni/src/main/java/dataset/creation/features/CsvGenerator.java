@@ -8,58 +8,65 @@ import java.io.FileWriter;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * Genera il CSV finale con tutte le metriche richieste.
- * Colonne:
- *   Version,File Name,Method Name,
- *   LOC,CognitiveComplexity,CyclomaticComplexity,
- *   CodeSmells,NestingDepth,ParameterCount,DecisionPoints,
- *   Priority,Buggy
- */
 public class CsvGenerator {
 
-    private final int version;
-    public CsvGenerator(int version) { this.version = version; }
+    private final String  version;
+    private final boolean append;
 
-    /** @param featuresPerFile  file → (methodId → feature)
-     *  @param info              insieme metodi buggy + priority per metodo
-     *  @param outputCsv         path del CSV in uscita */
+    /**
+     * @param version  la versione/tag Git da scrivere in ogni riga
+     * @param append   true = non riscrivere l’header, false = scrivere header
+     */
+    public CsvGenerator(String version, boolean append) {
+        this.version = version;
+        this.append  = append;
+    }
+
     public void generateCsv(
             Map<File, Map<String, FeatureExtractor.MethodFeatures>> featuresPerFile,
             BuggyMethodExtractor.BuggyInfo info,
-            String outputCsv) throws Exception {
+            String outputCsv
+    ) throws Exception {
+
+        CSVFormat fmt = append
+                ? CSVFormat.DEFAULT
+                : CSVFormat.DEFAULT.withHeader(
+                "Version","File Name","Method Name",
+                "LOC","CognitiveComplexity","CyclomaticComplexity",
+                "CodeSmells","NestingDepth","ParameterCount",
+                "Churn","ElseAdded","ElseDeleted","DecisionPoints","Buggy"
+        );
 
         try (CSVPrinter csv = new CSVPrinter(
-                new FileWriter(outputCsv),
-                CSVFormat.DEFAULT.withHeader(
-                        "Version","File Name","Method Name",
-                        "LOC","CognitiveComplexity","CyclomaticComplexity",
-                        "CodeSmells","NestingDepth","ParameterCount","DecisionPoints","Buggy"))) {
+                new FileWriter(outputCsv, append), fmt
+        )) {
+            Set<String> buggy            = info.buggyMethods;
+            Map<String,Integer> churn    = info.churnOfMethod;
+            Map<String,Integer> eAdded   = info.elseAddedOfMethod;
+            Map<String,Integer> eDeleted = info.elseDeletedOfMethod;
 
-            Set<String> buggy = info.buggyMethods;
-
-            for (Map.Entry<File, Map<String, FeatureExtractor.MethodFeatures>> e : featuresPerFile.entrySet()) {
-                String fileName = e.getKey().getName();
-
-                for (Map.Entry<String, FeatureExtractor.MethodFeatures> m : e.getValue().entrySet()) {
-                    String methodSig = m.getKey();                         // es. "void foo(int)"
-                    String methodId   = fileName + "#" + methodSig;        // chiave globale
-
-                    FeatureExtractor.MethodFeatures f = m.getValue();
-                    boolean isBuggy = buggy.contains(methodId);
+            for (var fe : featuresPerFile.entrySet()) {
+                String fileName = fe.getKey().getName();
+                for (var me : fe.getValue().entrySet()) {
+                    String sig = me.getKey();
+                    String id  = fileName + "#" + sig;
+                    var f      = me.getValue();
 
                     csv.printRecord(
                             version,
                             fileName,
-                            methodSig,
+                            sig,
                             f.methodLength,
                             f.cognitiveComplexity,
                             f.cyclomaticComplexity,
                             f.codeSmells,
                             f.nestingDepth,
                             f.parameterCount,
+                            churn.getOrDefault(id, 0),
+                            eAdded.getOrDefault(id, 0),
+                            eDeleted.getOrDefault(id, 0),
                             f.decisionPoints,
-                            isBuggy ? "Yes" : "No"
+                            buggy.contains(id) ? "Yes" : "No"
                     );
                 }
             }

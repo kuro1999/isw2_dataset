@@ -8,18 +8,22 @@ import java.io.FileWriter;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * Genera CSV includendo:
+ *  - static metrics (LOC, complexity, code smells, ecc.)
+ *  - churn metrics (total, avg, max)
+ *  - change details (elseAdded, elseDeleted, condChanges)
+ *  - history details (n° commit, n° autori)
+ *  - label buggy
+ */
 public class CsvGenerator {
 
-    private final String  version;
+    private final String version;
     private final boolean append;
 
-    /**
-     * @param version  la versione/tag Git da scrivere in ogni riga
-     * @param append   true = non riscrivere l’header, false = scrivere header
-     */
     public CsvGenerator(String version, boolean append) {
         this.version = version;
-        this.append  = append;
+        this.append = append;
     }
 
     public void generateCsv(
@@ -28,29 +32,47 @@ public class CsvGenerator {
             String outputCsv
     ) throws Exception {
 
+        // Header extended with new columns
+        String[] headers = append ? null : new String[] {
+                "Version", "File Name", "Method Name",
+                "LOC", "CognitiveComplexity", "CyclomaticComplexity",
+                "CodeSmells", "NestingDepth", "ParameterCount",
+                "ChurnTotal", "AvgAdded", "MaxAdded", "AvgDeleted", "MaxDeleted", "AvgChurn", "MaxChurn",
+                "ElseAdded", "ElseDeleted", "CondChanges",
+                "DecisionPoints",
+                "Histories", "Authors",
+                "Buggy"
+        };
+
         CSVFormat fmt = append
                 ? CSVFormat.DEFAULT
-                : CSVFormat.DEFAULT.withHeader(
-                "Version","File Name","Method Name",
-                "LOC","CognitiveComplexity","CyclomaticComplexity",
-                "CodeSmells","NestingDepth","ParameterCount",
-                "Churn","ElseAdded","ElseDeleted","DecisionPoints","Buggy"
-        );
+                : CSVFormat.DEFAULT.withHeader(headers);
 
-        try (CSVPrinter csv = new CSVPrinter(
-                new FileWriter(outputCsv, append), fmt
-        )) {
-            Set<String> buggy            = info.buggyMethods;
-            Map<String,Integer> churn    = info.churnOfMethod;
-            Map<String,Integer> eAdded   = info.elseAddedOfMethod;
-            Map<String,Integer> eDeleted = info.elseDeletedOfMethod;
+        try (CSVPrinter csv = new CSVPrinter(new FileWriter(outputCsv, append), fmt)) {
+            Set<String> buggySet = info.buggyMethods;
 
-            for (var fe : featuresPerFile.entrySet()) {
+            for (Map.Entry<File, Map<String, FeatureExtractor.MethodFeatures>> fe : featuresPerFile.entrySet()) {
                 String fileName = fe.getKey().getName();
-                for (var me : fe.getValue().entrySet()) {
+                for (Map.Entry<String, FeatureExtractor.MethodFeatures> me : fe.getValue().entrySet()) {
                     String sig = me.getKey();
                     String id  = fileName + "#" + sig;
-                    var f      = me.getValue();
+                    FeatureExtractor.MethodFeatures f = me.getValue();
+
+                    // fetch all metrics, with default fallbacks
+                    int   totalChurn = info.churnOfMethod.getOrDefault(id, 0);
+                    double avgAdd    = info.avgAddedOfMethod.getOrDefault(id, 0.0);
+                    int   maxAdd    = info.maxAddedOfMethod.getOrDefault(id, 0);
+                    double avgDel    = info.avgDeletedOfMethod.getOrDefault(id, 0.0);
+                    int   maxDel    = info.maxDeletedOfMethod.getOrDefault(id, 0);
+                    double avgCh    = info.avgChurnOfMethod.getOrDefault(id, 0.0);
+                    int   maxCh    = info.maxChurnOfMethod.getOrDefault(id, 0);
+                    int   elseAdd  = info.elseAddedOfMethod.getOrDefault(id, 0);
+                    int   elseDel  = info.elseDeletedOfMethod.getOrDefault(id, 0);
+                    int   condCh   = info.condChangesOfMethod.getOrDefault(id, 0);
+                    int   histories= info.methodHistoriesOfMethod.getOrDefault(id, 0);
+                    int   authors  = info.authorsOfMethod.getOrDefault(id, 0);
+                    int   decision = f.decisionPoints;
+                    boolean isBuggy= buggySet.contains(id);
 
                     csv.printRecord(
                             version,
@@ -62,11 +84,20 @@ public class CsvGenerator {
                             f.codeSmells,
                             f.nestingDepth,
                             f.parameterCount,
-                            churn.getOrDefault(id, 0),
-                            eAdded.getOrDefault(id, 0),
-                            eDeleted.getOrDefault(id, 0),
-                            f.decisionPoints,
-                            buggy.contains(id) ? "Yes" : "No"
+                            totalChurn,
+                            String.format("%.2f", avgAdd),
+                            maxAdd,
+                            String.format("%.2f", avgDel),
+                            maxDel,
+                            String.format("%.2f", avgCh),
+                            maxCh,
+                            elseAdd,
+                            elseDel,
+                            condCh,
+                            decision,
+                            histories,
+                            authors,
+                            isBuggy ? "Yes" : "No"
                     );
                 }
             }

@@ -7,10 +7,15 @@ import dataset.creation.fetcher.model.JiraTicket;
 import jakarta.json.bind.Jsonb;
 import jakarta.json.bind.JsonbBuilder;
 import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.diff.*;
-import org.eclipse.jgit.lib.*;
+import org.eclipse.jgit.diff.DiffEntry;
+import org.eclipse.jgit.diff.DiffFormatter;
+import org.eclipse.jgit.diff.RawTextComparator;
+import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.patch.FileHeader;
-import org.eclipse.jgit.revwalk.*;
+import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.revwalk.RevTree;
+import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.treewalk.AbstractTreeIterator;
 import org.eclipse.jgit.treewalk.CanonicalTreeParser;
@@ -21,68 +26,156 @@ import org.slf4j.LoggerFactory;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
- * Individua i metodi modificati (buggy) nei commit di fix,
- * ne calcola churn, else‐added e else‐deleted, e supporta caching.
+ * Estende il calcolo "buggy" includendo statistiche:
+ *  - total churn, avg/max added/deleted/churn
+ *  - condChanges (# di if/else/case modificate)
+ *  - histories (# commit per metodo)
+ *  - authors (# autori distinti per metodo)
  */
 public class BuggyMethodExtractor {
 
     private static final Logger logger = LoggerFactory.getLogger(BuggyMethodExtractor.class);
     private static final String CACHE_FILE = "buggy_info_cache.json";
 
-    /**
-     * Risultato:
-     *  • buggyMethods           = insieme di methodId (“File.java#signature”)
-     *  • churnOfMethod          = churn totale (added+deleted) per methodId
-     *  • elseAddedOfMethod      = numero di “else” aggiunti per methodId
-     *  • elseDeletedOfMethod    = numero di “else” rimossi per methodId
-     */
     public static class BuggyInfo {
-        public final Set<String>            buggyMethods;
-        public final Map<String,Integer>    churnOfMethod;
-        public final Map<String,Integer>    elseAddedOfMethod;
-        public final Map<String,Integer>    elseDeletedOfMethod;
+        public final Set<String> buggyMethods;
+        public final Map<String,Integer> churnOfMethod;
+        public final Map<String,Integer> elseAddedOfMethod;
+        public final Map<String,Integer> elseDeletedOfMethod;
+        public final Map<String,Integer> condChangesOfMethod;
+        public final Map<String,Integer> methodHistoriesOfMethod;
+        public final Map<String,Integer> authorsOfMethod;
+        public final Map<String,Double> avgAddedOfMethod;
+        public final Map<String,Integer> maxAddedOfMethod;
+        public final Map<String,Double> avgDeletedOfMethod;
+        public final Map<String,Integer> maxDeletedOfMethod;
+        public final Map<String,Double> avgChurnOfMethod;
+        public final Map<String,Integer> maxChurnOfMethod;
 
-        public BuggyInfo(Set<String> b,
-                         Map<String,Integer> c,
-                         Map<String,Integer> ea,
-                         Map<String,Integer> ed) {
-            this.buggyMethods        = b;
-            this.churnOfMethod       = c;
-            this.elseAddedOfMethod   = ea;
-            this.elseDeletedOfMethod = ed;
+        public BuggyInfo(Set<String> buggy,
+                         Map<String,Integer> churn,
+                         Map<String,Integer> elseAdd,
+                         Map<String,Integer> elseDel,
+                         Map<String,Integer> condCh,
+                         Map<String,Integer> histories,
+                         Map<String,Integer> authors,
+                         Map<String,Double> avgAdd,
+                         Map<String,Integer> maxAdd,
+                         Map<String,Double> avgDel,
+                         Map<String,Integer> maxDel,
+                         Map<String,Double> avgCh,
+                         Map<String,Integer> maxCh) {
+            this.buggyMethods = buggy;
+            this.churnOfMethod = churn;
+            this.elseAddedOfMethod = elseAdd;
+            this.elseDeletedOfMethod = elseDel;
+            this.condChangesOfMethod = condCh;
+            this.methodHistoriesOfMethod = histories;
+            this.authorsOfMethod = authors;
+            this.avgAddedOfMethod = avgAdd;
+            this.maxAddedOfMethod = maxAdd;
+            this.avgDeletedOfMethod = avgDel;
+            this.maxDeletedOfMethod = maxDel;
+            this.avgChurnOfMethod = avgCh;
+            this.maxChurnOfMethod = maxCh;
         }
 
         public BuggyInfoDTO toDto() {
             BuggyInfoDTO dto = new BuggyInfoDTO();
-            dto.buggyMethods         = new ArrayList<>(buggyMethods);
-            dto.churnOfMethod        = churnOfMethod;
-            dto.elseAddedOfMethod    = elseAddedOfMethod;
-            dto.elseDeletedOfMethod  = elseDeletedOfMethod;
+            dto.buggyMethods = new ArrayList<>(buggyMethods);
+            dto.churnOfMethod = churnOfMethod;
+            dto.elseAddedOfMethod = elseAddedOfMethod;
+            dto.elseDeletedOfMethod = elseDeletedOfMethod;
+            dto.condChangesOfMethod = condChangesOfMethod;
+            dto.methodHistoriesOfMethod = methodHistoriesOfMethod;
+            dto.authorsOfMethod = authorsOfMethod;
+            dto.avgAddedOfMethod = avgAddedOfMethod;
+            dto.maxAddedOfMethod = maxAddedOfMethod;
+            dto.avgDeletedOfMethod = avgDeletedOfMethod;
+            dto.maxDeletedOfMethod = maxDeletedOfMethod;
+            dto.avgChurnOfMethod = avgChurnOfMethod;
+            dto.maxChurnOfMethod = maxChurnOfMethod;
             return dto;
         }
+
         public static BuggyInfo fromDto(BuggyInfoDTO dto) {
+            Set<String> buggy = dto.buggyMethods != null
+                    ? new HashSet<>(dto.buggyMethods)
+                    : new HashSet<>();
+            Map<String,Integer> churn = dto.churnOfMethod != null
+                    ? dto.churnOfMethod
+                    : new HashMap<>();
+            Map<String,Integer> elseAdd = dto.elseAddedOfMethod != null
+                    ? dto.elseAddedOfMethod
+                    : new HashMap<>();
+            Map<String,Integer> elseDel = dto.elseDeletedOfMethod != null
+                    ? dto.elseDeletedOfMethod
+                    : new HashMap<>();
+            Map<String,Integer> condCh = dto.condChangesOfMethod != null
+                    ? dto.condChangesOfMethod
+                    : new HashMap<>();
+            Map<String,Integer> histories = dto.methodHistoriesOfMethod != null
+                    ? dto.methodHistoriesOfMethod
+                    : new HashMap<>();
+            Map<String,Integer> authors = dto.authorsOfMethod != null
+                    ? dto.authorsOfMethod
+                    : new HashMap<>();
+            Map<String,Double> avgAdd = dto.avgAddedOfMethod != null
+                    ? dto.avgAddedOfMethod
+                    : new HashMap<>();
+            Map<String,Integer> maxAdd = dto.maxAddedOfMethod != null
+                    ? dto.maxAddedOfMethod
+                    : new HashMap<>();
+            Map<String,Double> avgDel = dto.avgDeletedOfMethod != null
+                    ? dto.avgDeletedOfMethod
+                    : new HashMap<>();
+            Map<String,Integer> maxDel = dto.maxDeletedOfMethod != null
+                    ? dto.maxDeletedOfMethod
+                    : new HashMap<>();
+            Map<String,Double> avgCh = dto.avgChurnOfMethod != null
+                    ? dto.avgChurnOfMethod
+                    : new HashMap<>();
+            Map<String,Integer> maxCh = dto.maxChurnOfMethod != null
+                    ? dto.maxChurnOfMethod
+                    : new HashMap<>();
+
             return new BuggyInfo(
-                    new HashSet<>(dto.buggyMethods),
-                    dto.churnOfMethod,
-                    dto.elseAddedOfMethod,
-                    dto.elseDeletedOfMethod
+                    buggy,
+                    churn,
+                    elseAdd,
+                    elseDel,
+                    condCh,
+                    histories,
+                    authors,
+                    avgAdd,
+                    maxAdd,
+                    avgDel,
+                    maxDel,
+                    avgCh,
+                    maxCh
             );
         }
     }
 
-    /** DTO per il JSON cache */
     public static class BuggyInfoDTO {
-        public List<String>          buggyMethods;
-        public Map<String,Integer>   churnOfMethod;
-        public Map<String,Integer>   elseAddedOfMethod;
-        public Map<String,Integer>   elseDeletedOfMethod;
+        public List<String> buggyMethods;
+        public Map<String,Integer> churnOfMethod;
+        public Map<String,Integer> elseAddedOfMethod;
+        public Map<String,Integer> elseDeletedOfMethod;
+        public Map<String,Integer> condChangesOfMethod;
+        public Map<String,Integer> methodHistoriesOfMethod;
+        public Map<String,Integer> authorsOfMethod;
+        public Map<String,Double> avgAddedOfMethod;
+        public Map<String,Integer> maxAddedOfMethod;
+        public Map<String,Double> avgDeletedOfMethod;
+        public Map<String,Integer> maxDeletedOfMethod;
+        public Map<String,Double> avgChurnOfMethod;
+        public Map<String,Integer> maxChurnOfMethod;
     }
 
-    /**
-     * Carica la cache se esiste, altrimenti calcola e salva su disco.
-     */
     public static BuggyInfo computeOrLoad(File repoDir, List<JiraTicket> tickets) throws Exception {
         File cache = new File(CACHE_FILE);
         if (cache.exists()) {
@@ -103,43 +196,25 @@ public class BuggyMethodExtractor {
         return info;
     }
 
-    /**
-     * Analizza i commit di fix, raccoglie:
-     *   • churn (added+deleted)
-     *   • elseAdded
-     *   • elseDeleted
-     * per ogni metodo modificato.
-     */
-    private static BuggyInfo computeBuggyMethods(
-            File repoDir,
-            List<JiraTicket> tickets
-    ) throws Exception {
-
-        // 1) Apri il repository
+    private static BuggyInfo computeBuggyMethods(File repoDir, List<JiraTicket> tickets) throws Exception {
         Repository repository = new FileRepositoryBuilder()
                 .setGitDir(new File(repoDir, ".git"))
-                .readEnvironment()
-                .findGitDir()
-                .build();
+                .readEnvironment().findGitDir().build();
         Git git = new Git(repository);
 
-        // 2) Filtra i ticket Fixed + (Closed|Resolved)
         Set<String> defectKeys = new HashSet<>();
         for (JiraTicket t : tickets) {
             if ("Fixed".equalsIgnoreCase(t.getResolution())
-                    && ("Closed".equalsIgnoreCase(t.getStatus())
-                    || "Resolved".equalsIgnoreCase(t.getStatus()))) {
+                    && ("Closed".equalsIgnoreCase(t.getStatus()) || "Resolved".equalsIgnoreCase(t.getStatus()))) {
                 defectKeys.add(t.getKey());
             }
         }
         logger.info("» Ticket fix rilevati: {}", defectKeys.size());
 
-        // 3) Trova i commit che menzionano quei ticket
         Set<ObjectId> fixCommits = new HashSet<>();
         for (RevCommit c : git.log().call()) {
-            String msg = c.getFullMessage();
             for (String key : defectKeys) {
-                if (msg.contains(key)) {
+                if (c.getFullMessage().contains(key)) {
                     fixCommits.add(c.getId());
                     break;
                 }
@@ -147,11 +222,16 @@ public class BuggyMethodExtractor {
         }
         logger.info("» Commit di fix trovati: {}", fixCommits.size());
 
-        // 4) Per ogni commit: diff, churn, elseAdded, elseDeleted
-        Set<String> buggyMethods              = new HashSet<>();
-        Map<String,Integer> churnMap          = new HashMap<>();
-        Map<String,Integer> elseAddedMap      = new HashMap<>();
-        Map<String,Integer> elseDeletedMap    = new HashMap<>();
+        Set<String> buggyMethods = new HashSet<>();
+        Map<String,Integer> churnMap = new HashMap<>();
+        Map<String,Integer> elseAddMap = new HashMap<>();
+        Map<String,Integer> elseDelMap = new HashMap<>();
+        Map<String,Integer> condMap = new HashMap<>();
+        Map<String,List<Integer>> addList = new HashMap<>();
+        Map<String,List<Integer>> delList = new HashMap<>();
+        Map<String,List<Integer>> churnList = new HashMap<>();
+        Map<String,Set<String>> authorMap = new HashMap<>();
+        Map<String,Integer> histories = new HashMap<>();
 
         DiffFormatter df = new DiffFormatter(DisabledOutputStream.INSTANCE);
         df.setRepository(repository);
@@ -161,64 +241,45 @@ public class BuggyMethodExtractor {
         for (ObjectId cid : fixCommits) {
             try (RevWalk rw = new RevWalk(repository)) {
                 RevCommit commit = rw.parseCommit(cid);
-                if (commit.getParentCount() == 0) continue;
                 RevCommit parent = rw.parseCommit(commit.getParent(0).getId());
-
                 AbstractTreeIterator pt = prepareTree(repository, parent);
                 AbstractTreeIterator ct = prepareTree(repository, commit);
 
+                String author = commit.getAuthorIdent().getName();
                 for (DiffEntry diff : df.scan(pt, ct)) {
                     if (diff.getChangeType() != DiffEntry.ChangeType.MODIFY) continue;
                     String path = diff.getNewPath();
                     if (!path.endsWith(".java")) continue;
 
-                    // carica vecchia e nuova versione per "else"
-                    List<String> oldLines = Arrays.asList(
-                            new String(repository.open(diff.getOldId().toObjectId()).getBytes(), StandardCharsets.UTF_8)
-                                    .split("\r?\n", -1));
-                    List<String> newLines = Arrays.asList(
-                            new String(repository.open(diff.getNewId().toObjectId()).getBytes(), StandardCharsets.UTF_8)
-                                    .split("\r?\n", -1));
+                    String oldSrc = new String(repository.open(diff.getOldId().toObjectId()).getBytes(), StandardCharsets.UTF_8);
+                    String newSrc = new String(repository.open(diff.getNewId().toObjectId()).getBytes(), StandardCharsets.UTF_8);
+                    List<String> oldLines = Arrays.asList(oldSrc.split("\r?\n", -1));
+                    List<String> newLines = Arrays.asList(newSrc.split("\r?\n", -1));
 
                     FileHeader fh = df.toFileHeader(diff);
-                    for (Edit e : fh.toEditList()) {
-                        int added   = e.getEndB() - e.getBeginB();
+                    for (var e : fh.toEditList()) {
+                        int added = e.getEndB() - e.getBeginB();
                         int deleted = e.getEndA() - e.getBeginA();
-                        int delta   = added + deleted;
+                        int delta = added + deleted;
 
-                        // parsing file nuovo per estrarre i metodi
-                        CompilationUnit cu = StaticJavaParser.parse(
-                                new String(repository.open(diff.getNewId().toObjectId()).getBytes(), StandardCharsets.UTF_8)
-                        );
-
+                        CompilationUnit cu = StaticJavaParser.parse(newSrc);
                         for (MethodDeclaration md : cu.findAll(MethodDeclaration.class)) {
                             md.getRange().ifPresent(r -> {
-                                int mb = r.begin.line, me = r.end.line;
-                                // churn + elseAdded
-                                for (int ln = e.getBeginB() + 1; ln <= e.getEndB(); ln++) {
-                                    if (ln >= mb && ln <= me) {
-                                        String fileName = path.substring(path.lastIndexOf('/') + 1);
-                                        String sig      = md.getDeclarationAsString(false,false,false);
-                                        String id       = fileName + "#" + sig;
+                                if (e.getBeginB()+1 <= r.end.line && e.getEndB() >= r.begin.line) {
+                                    String id = new File(path).getName() + "#" + md.getDeclarationAsString(false,false,false);
+                                    buggyMethods.add(id);
+                                    churnMap.merge(id, delta, Integer::sum);
+                                    addList.computeIfAbsent(id, k->new ArrayList<>()).add(added);
+                                    delList.computeIfAbsent(id, k->new ArrayList<>()).add(deleted);
+                                    churnList.computeIfAbsent(id, k->new ArrayList<>()).add(delta);
+                                    authorMap.computeIfAbsent(id, k->new HashSet<>()).add(author);
+                                    histories.merge(id, 1, Integer::sum);
 
-                                        buggyMethods.add(id);
-                                        churnMap.merge(id, delta, Integer::sum);
-
-                                        if (newLines.get(ln-1).contains("else")) {
-                                            elseAddedMap.merge(id, 1, Integer::sum);
-                                        }
-                                        break;
-                                    }
-                                }
-                                // elseDeleted
-                                for (int ln = e.getBeginA() + 1; ln <= e.getEndA(); ln++) {
-                                    if (ln >= mb && ln <= me && oldLines.get(ln-1).contains("else")) {
-                                        String fileName = path.substring(path.lastIndexOf('/') + 1);
-                                        String sig      = md.getDeclarationAsString(false,false,false);
-                                        String id       = fileName + "#" + sig;
-
-                                        elseDeletedMap.merge(id, 1, Integer::sum);
-                                        break;
+                                    for (int ln=e.getBeginB()+1; ln<=e.getEndB(); ln++) if (newLines.get(ln-1).contains("else")) elseAddMap.merge(id,1,Integer::sum);
+                                    for (int ln=e.getBeginA()+1; ln<=e.getEndA(); ln++) if (oldLines.get(ln-1).contains("else")) elseDelMap.merge(id,1,Integer::sum);
+                                    for (int ln=e.getBeginB()+1; ln<=e.getEndB(); ln++) {
+                                        String l=newLines.get(ln-1);
+                                        if (l.contains("if")||l.contains("case")) condMap.merge(id,1,Integer::sum);
                                     }
                                 }
                             });
@@ -227,21 +288,47 @@ public class BuggyMethodExtractor {
                 }
             }
         }
+        df.close(); repository.close();
 
-        df.close();
-        repository.close();
-        return new BuggyInfo(buggyMethods, churnMap, elseAddedMap, elseDeletedMap);
+        Map<String,Double> avgAdd = new HashMap<>();
+        Map<String,Integer> mAdd = new HashMap<>();
+        Map<String,Double> avgDel = new HashMap<>();
+        Map<String,Integer> mDel = new HashMap<>();
+        Map<String,Double> avgCh = new HashMap<>();
+        Map<String,Integer> mCh = new HashMap<>();
+        for (String id : churnList.keySet()) {
+            List<Integer> adds = addList.getOrDefault(id, List.of());
+            avgAdd.put(id, adds.stream().mapToInt(x->x).average().orElse(0));
+            mAdd.put(id, adds.stream().mapToInt(x->x).max().orElse(0));
+            List<Integer> dels = delList.getOrDefault(id, List.of());
+            avgDel.put(id, dels.stream().mapToInt(x->x).average().orElse(0));
+            mDel.put(id, dels.stream().mapToInt(x->x).max().orElse(0));
+            List<Integer> chs = churnList.get(id);
+            avgCh.put(id, chs.stream().mapToInt(x->x).average().orElse(0));
+            mCh.put(id, chs.stream().mapToInt(x->x).max().orElse(0));
+        }
+
+        return new BuggyInfo(
+                buggyMethods,
+                churnMap,
+                elseAddMap,
+                elseDelMap,
+                condMap,
+                histories,
+                authorMap.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e->e.getValue().size())),
+                avgAdd, mAdd, avgDel, mDel, avgCh, mCh
+        );
     }
 
-    /** Helper: costruisce un TreeIterator per un RevCommit */
     private static AbstractTreeIterator prepareTree(Repository repo, RevCommit commit) throws Exception {
+        RevTree tree;
         try (RevWalk rw = new RevWalk(repo)) {
-            RevTree tree = rw.parseTree(commit.getTree().getId());
-            CanonicalTreeParser p = new CanonicalTreeParser();
-            try (ObjectReader r = repo.newObjectReader()) {
-                p.reset(r, tree.getId());
-            }
-            return p;
+            tree = rw.parseTree(commit.getTree().getId());
         }
+        CanonicalTreeParser p = new CanonicalTreeParser();
+        try (var reader = repo.newObjectReader()) {
+            p.reset(reader, tree.getId());
+        }
+        return p;
     }
 }

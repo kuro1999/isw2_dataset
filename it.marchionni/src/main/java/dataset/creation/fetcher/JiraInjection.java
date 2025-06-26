@@ -67,9 +67,7 @@ public class JiraInjection {
                 .findFirst().orElse(null);
     }
 
-    /**
-     * 3) Pull Bug/Fixed tickets, mappandoli in JiraTicket.
-     */
+    /** 3) Pull Bug/Fixed tickets, mappandoli in JiraTicket. */
     public void pullIssues() throws IOException {
         ticketsWithIssues.clear();
         int startAt = 0, pageSize = 1000, total;
@@ -108,6 +106,13 @@ public class JiraInjection {
 
         ticketsWithIssues.sort(Comparator.comparing(JiraTicket::getResolutionDate));
         System.out.printf("→ estratti %d ticket Bug/Fixed%n", ticketsWithIssues.size());
+    }
+
+    /**
+     * Ritorna la lista delle release JIRA caricate
+     */
+    public List<JiraVersion> getReleases() {
+        return Collections.unmodifiableList(releases);
     }
 
     public List<JiraTicket> getTicketsWithIssues() {

@@ -18,6 +18,8 @@ import net.sourceforge.pmd.util.datasource.FileDataSource;
 import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Estrae le feature essenziali da un file .java, tra cui:
@@ -33,6 +35,7 @@ public class FeatureExtractor {
 
     public Map<String, MethodFeatures> extractFromFile(File javaFile) throws Exception {
 
+        Logger.getLogger("net.sourceforge.pmd").setLevel(Level.SEVERE);
         /* ------------------------------------------------------------------
            0) Code Smells via PMD 6.55.0 (SourceCodeProcessor)
            ------------------------------------------------------------------ */

@@ -10,6 +10,8 @@ import dataset.creation.features.BuggyMethodExtractor;
 import dataset.creation.features.BuggyMethodExtractor.BuggyInfo;
 import dataset.creation.features.CsvGenerator;
 import dataset.creation.utils.CsvDeduplicator;
+import dataset.creation.utils.FinalCsvReducer;
+
 
 import jakarta.json.bind.Jsonb;
 import jakarta.json.bind.JsonbBuilder;
@@ -36,8 +38,10 @@ import java.io.InputStream;
 import java.io.Reader;
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.PathMatcher;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -47,11 +51,47 @@ import java.util.zip.ZipInputStream;
 
 public class Main {
     private static final Logger log = LoggerFactory.getLogger(Main.class);
-    private static final Path   BK_REPO = Path.of("/home/edo/isw2/bookkeeper_isw2");
+    private static final Path BK_REPO = Path.of("/home/edo/isw2/bookkeeper_isw2");
     private static final OkHttpClient http = new OkHttpClient();
     private static final Gson gson = new Gson();
     private static final String OWNER = "apache";
     private static final String REPO  = "bookkeeper";
+
+    // Matcher definitions from CodeParser
+    // Escludi tutto sotto src/main/java/tests
+    private static final PathMatcher MAIN_TESTS_DIR_MATCHER =
+            FileSystems.getDefault().getPathMatcher("glob:**/src/main/java/tests/**");
+
+    private static final PathMatcher TEST_DIR_MATCHER     =
+            FileSystems.getDefault().getPathMatcher("glob:**/src/test/java/**");
+    private static final PathMatcher TEST_CLASS_MATCHER   =
+            FileSystems.getDefault().getPathMatcher("glob:**/*{Test,IT}.java");
+    private static final PathMatcher IGNORE_MATCHER       =
+            FileSystems.getDefault().getPathMatcher("glob:**/{target,build,generated-sources}/**");
+    private static final PathMatcher DTO_IGNORE           =
+            FileSystems.getDefault().getPathMatcher("glob:**/{dto,model}/**");
+
+    // Nuovi filtri per demo/sample/example
+    private static final PathMatcher DEMO_DIR_MATCHER     =
+            FileSystems.getDefault().getPathMatcher("glob:**/{demo,sample,example}/**");
+    private static final PathMatcher DEMO_CLASS_MATCHER   =
+            FileSystems.getDefault().getPathMatcher("glob:**/*{Demo,Sample,Example}.java");
+
+    // Nuovi filtri per mock, stub e test-data
+    private static final PathMatcher MOCK_DIR_MATCHER     =
+            FileSystems.getDefault().getPathMatcher("glob:**/{mock,stubs,test-data}/**");
+    private static final PathMatcher MOCK_CLASS_MATCHER   =
+            FileSystems.getDefault().getPathMatcher("glob:**/*Mock.java");
+    private static final PathMatcher STUB_CLASS_MATCHER   =
+            FileSystems.getDefault().getPathMatcher("glob:**/*Stub.java");
+    private static final PathMatcher TESTDATA_CLASS_MATCHER =
+            FileSystems.getDefault().getPathMatcher("glob:**/*TestData.java");
+
+    // Nuovi filtri per benchmark / performance
+    private static final PathMatcher BENCH_DIR_MATCHER    =
+            FileSystems.getDefault().getPathMatcher("glob:**/benchmark/**");
+    private static final PathMatcher BENCH_CLASS_MATCHER  =
+            FileSystems.getDefault().getPathMatcher("glob:**/*Benchmark.java");
 
     public static void main(String[] args) {
         try {
@@ -138,10 +178,16 @@ public class Main {
             Path filteredCsv  = Paths.get("dataset_bookkeeper_filtered.csv");
             CsvDeduplicator.dedupAndFilterUpTo(dedupCsv, filteredCsv, "4.2.1");
             log.info("CSV filtrato fino a 4.2.1 salvato in {}", filteredCsv.toAbsolutePath());
+            /* 7️⃣  Rimozione duplicati cross-release (stesso metodo, stesse feature) */
+            Path finalCsv = Paths.get("bookkeeper_dataset_finale.csv");
+            FinalCsvReducer.reduceDuplicates(filteredCsv, finalCsv);
+            log.info("CSV finale salvato in {}", finalCsv.toAbsolutePath());
+
 
         } catch (Exception e) {
             log.error("Errore esecuzione", e);
         }
+
     }
 
     /* Utility private (unchanged) */
@@ -223,11 +269,26 @@ public class Main {
         }
     }
 
+    // walkAndExtract con tutti i filtri
     private static Map<File, Map<String, FeatureExtractor.MethodFeatures>> walkAndExtract(
             File dir, FeatureExtractor fx) throws IOException {
         Map<File, Map<String, FeatureExtractor.MethodFeatures>> m = new HashMap<>();
         try (Stream<Path> ps = Files.walk(dir.toPath())) {
-            ps.filter(p -> p.toString().endsWith(".java") && p.toString().contains("/src/main/java/"))
+            ps.filter(Files::isRegularFile)
+                    .filter(p -> p.toString().endsWith(".java"))
+                    .filter(p -> !TEST_DIR_MATCHER.matches(p))
+                    .filter(p -> !TEST_CLASS_MATCHER.matches(p))
+                    .filter(p -> !MAIN_TESTS_DIR_MATCHER.matches(p))
+                    .filter(p -> !IGNORE_MATCHER.matches(p))
+                    .filter(p -> !DTO_IGNORE.matches(p))
+                    .filter(p -> !DEMO_DIR_MATCHER.matches(p))
+                    .filter(p -> !DEMO_CLASS_MATCHER.matches(p))
+                    .filter(p -> !MOCK_DIR_MATCHER.matches(p))
+                    .filter(p -> !MOCK_CLASS_MATCHER.matches(p))
+                    .filter(p -> !STUB_CLASS_MATCHER.matches(p))
+                    .filter(p -> !TESTDATA_CLASS_MATCHER.matches(p))
+                    .filter(p -> !BENCH_DIR_MATCHER.matches(p))
+                    .filter(p -> !BENCH_CLASS_MATCHER.matches(p))
                     .map(Path::toFile)
                     .forEach(f -> {
                         try { m.put(f, fx.extractFromFile(f)); }

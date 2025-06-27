@@ -1,5 +1,7 @@
 package dataset.creation.utils;
 
+import dataset.creation.utils.PipelineUtils;
+
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Ref;
 import org.slf4j.Logger;
@@ -44,7 +46,8 @@ public class GitTagUtil {
                 .distinct()
                 .collect(Collectors.toList());
 
-        tags.sort(dataset.creation.Main::compareSemver);
+        // Usa PipelineUtils::compareSemver per ordinare
+        tags.sort(PipelineUtils::compareSemver);
 
         Files.write(outputFile,
                 tags,

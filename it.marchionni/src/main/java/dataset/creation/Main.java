@@ -11,306 +11,173 @@ import dataset.creation.features.BuggyMethodExtractor.BuggyInfo;
 import dataset.creation.features.CsvGenerator;
 import dataset.creation.utils.CsvDeduplicator;
 import dataset.creation.utils.FinalCsvReducer;
-
+import dataset.creation.utils.PipelineUtils;
 
 import jakarta.json.bind.Jsonb;
 import jakarta.json.bind.JsonbBuilder;
 import jakarta.json.bind.JsonbConfig;
 
-import okhttp3.HttpUrl;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
-
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-
-import org.eclipse.jgit.lib.Repository;
-import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
 import java.io.Reader;
+import java.io.Writer;
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileSystems;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.PathMatcher;
-import java.nio.file.Paths;
+import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
+
+import static dataset.creation.utils.PipelineUtils.DEFAULT_FILTERS;
 
 public class Main {
-    private static final Logger log = LoggerFactory.getLogger(Main.class);
-    private static final Path BK_REPO = Path.of("/home/edo/isw2/bookkeeper_isw2");
-    private static final OkHttpClient http = new OkHttpClient();
-    private static final Gson gson = new Gson();
-    private static final String OWNER = "apache";
-    private static final String REPO  = "bookkeeper";
 
-    // Matcher definitions from CodeParser
-    // Escludi tutto sotto src/main/java/tests
-    private static final PathMatcher MAIN_TESTS_DIR_MATCHER =
-            FileSystems.getDefault().getPathMatcher("glob:**/src/main/java/tests/**");
+    private static final Logger LOG = LoggerFactory.getLogger(Main.class);
 
-    private static final PathMatcher TEST_DIR_MATCHER     =
-            FileSystems.getDefault().getPathMatcher("glob:**/src/test/java/**");
-    private static final PathMatcher TEST_CLASS_MATCHER   =
-            FileSystems.getDefault().getPathMatcher("glob:**/*{Test,IT}.java");
-    private static final PathMatcher IGNORE_MATCHER       =
-            FileSystems.getDefault().getPathMatcher("glob:**/{target,build,generated-sources}/**");
-    private static final PathMatcher DTO_IGNORE           =
-            FileSystems.getDefault().getPathMatcher("glob:**/{dto,model}/**");
+    public static void main(String[] args) throws Exception {
+        // ① Definisci qui i progetti da processare:
+        List<ProjectConfig> projects = List.of(
+                new ProjectConfig("apache", "openjpa", "OPENJPA",
+                        Path.of("/home/edo/isw2/openjpa_isw2"),
+                        null, Map.of()),
+                new ProjectConfig("apache", "bookkeeper", "BOOKKEEPER",
+                        Path.of("/home/edo/isw2/bookkeeper_isw2"),
+                        "4.2.1", Map.of())
+        );
 
-    // Nuovi filtri per demo/sample/example
-    private static final PathMatcher DEMO_DIR_MATCHER     =
-            FileSystems.getDefault().getPathMatcher("glob:**/{demo,sample,example}/**");
-    private static final PathMatcher DEMO_CLASS_MATCHER   =
-            FileSystems.getDefault().getPathMatcher("glob:**/*{Demo,Sample,Example}.java");
-
-    // Nuovi filtri per mock, stub e test-data
-    private static final PathMatcher MOCK_DIR_MATCHER     =
-            FileSystems.getDefault().getPathMatcher("glob:**/{mock,stubs,test-data}/**");
-    private static final PathMatcher MOCK_CLASS_MATCHER   =
-            FileSystems.getDefault().getPathMatcher("glob:**/*Mock.java");
-    private static final PathMatcher STUB_CLASS_MATCHER   =
-            FileSystems.getDefault().getPathMatcher("glob:**/*Stub.java");
-    private static final PathMatcher TESTDATA_CLASS_MATCHER =
-            FileSystems.getDefault().getPathMatcher("glob:**/*TestData.java");
-
-    // Nuovi filtri per benchmark / performance
-    private static final PathMatcher BENCH_DIR_MATCHER    =
-            FileSystems.getDefault().getPathMatcher("glob:**/benchmark/**");
-    private static final PathMatcher BENCH_CLASS_MATCHER  =
-            FileSystems.getDefault().getPathMatcher("glob:**/*Benchmark.java");
-
-    public static void main(String[] args) {
-        try {
-            log.info("Avvio processo dataset BOOKKEEPER");
-            BookkeeperFetcher fetcher = new BookkeeperFetcher();
-            List<JiraTicket> tickets  = loadOrDownloadTickets(fetcher);
-
-            /* 1️⃣  Release da JIRA */
-            JiraInjection jiraInj = new JiraInjection("BOOKKEEPER");
-            jiraInj.injectReleases();
-            List<JiraVersion> jiraReleases = jiraInj.getReleases();
-            log.info("Release JIRA: {}", jiraReleases.size());
-
-            Path jiraFile = Paths.get("jira_releases.txt");
-            List<String> jiraNames = jiraReleases.stream()
-                    .map(JiraVersion::getName)
-                    .collect(Collectors.toList());
-            Files.write(jiraFile, jiraNames, StandardCharsets.UTF_8);
-            log.info("File release JIRA: {}", jiraFile.toAbsolutePath());
-
-            /* 2️⃣  Tag da GitHub */
-            List<String> gitTags = fetchGitHubTags(OWNER, REPO);
-            log.info("Tag GitHub: {}", gitTags.size());
-
-            Path gitFile = Paths.get("git_tags.txt");
-            Files.write(gitFile, gitTags, StandardCharsets.UTF_8);
-            log.info("File tag Git: {}", gitFile.toAbsolutePath());
-
-            /* 3️⃣  Intersezione */
-            Set<String> jiraNormalized = jiraNames.stream()
-                    .map(Main::normalize)
-                    .collect(Collectors.toSet());
-            List<String> releases = gitTags.stream()
-                    .filter(t -> jiraNormalized.contains(normalize(t)))
-                    .sorted(Main::compareSemver)
-                    .collect(Collectors.toList());
-            if (releases.isEmpty()) {
-                log.warn("Nessun tag comune: userò HEAD");
-                releases = List.of("HEAD");
+        for (ProjectConfig cfg : projects) {
+            try {
+                runPipelineFor(cfg);
+            } catch (Exception e) {
+                LOG.error("🔴 Errore nella pipeline per {}:", cfg.repo(), e);
             }
-            log.info("Release da elaborare: {}", releases);
-
-            Path commonFile = Paths.get("common_releases.txt");
-            Files.write(commonFile, releases, StandardCharsets.UTF_8);
-            log.info("File release comuni: {}", commonFile.toAbsolutePath());
-
-            /* 4️⃣  Commit dal repo */
-            GitInjection gitInj = new GitInjection(
-                    repoRemoteUrl(), BK_REPO.toFile(), new ArrayList<>()
-            );
-            gitInj.injectCommits();
-
-            /* 5️⃣  Estrazione feature e CSV */
-            FeatureExtractor fx = new FeatureExtractor();
-            BuggyInfo bugInfo  = BuggyMethodExtractor.computeOrLoad(
-                    BK_REPO.toFile(), tickets
-            );
-
-            String csvName = "dataset_bookkeeper.csv";
-            boolean first = true;
-            for (String tag : releases) {
-                log.info("Elaboro release {}", tag);
-                Map<File, Map<String, FeatureExtractor.MethodFeatures>> feats;
-                if ("HEAD".equals(tag)) {
-                    feats = walkAndExtract(BK_REPO.toFile(), fx);
-                } else {
-                    Path tmp = downloadAndUnzip(OWNER, REPO, tag);
-                    Path proj = findSingleSubdir(tmp);
-                    feats = walkAndExtract(proj.toFile(), fx);
-                    deleteDirectoryRecursively(tmp);
-                }
-                new CsvGenerator(tag, !first)
-                        .generateCsv(feats, bugInfo, csvName);
-                first = false;
-            }
-            log.info("CSV grezzo salvato in {}", Paths.get(csvName).toAbsolutePath());
-
-            /* 6️⃣  Deduplicazione e filtro su dataset CSV */
-            Path rawCsv       = Paths.get(csvName);
-            Path dedupCsv     = Paths.get("dataset_bookkeeper_dedup.csv");
-            CsvDeduplicator.deduplicate(rawCsv, dedupCsv);
-            log.info("CSV deduplicato salvato in {}", dedupCsv.toAbsolutePath());
-
-            Path filteredCsv  = Paths.get("dataset_bookkeeper_filtered.csv");
-            CsvDeduplicator.dedupAndFilterUpTo(dedupCsv, filteredCsv, "4.2.1");
-            log.info("CSV filtrato fino a 4.2.1 salvato in {}", filteredCsv.toAbsolutePath());
-            /* 7️⃣  Rimozione duplicati cross-release (stesso metodo, stesse feature) */
-            Path finalCsv = Paths.get("bookkeeper_dataset_finale.csv");
-            FinalCsvReducer.reduceDuplicates(filteredCsv, finalCsv);
-            log.info("CSV finale salvato in {}", finalCsv.toAbsolutePath());
-
-
-        } catch (Exception e) {
-            log.error("Errore esecuzione", e);
         }
-
     }
 
-    /* Utility private (unchanged) */
-    private static String repoRemoteUrl() throws IOException {
-        Repository r = new FileRepositoryBuilder()
-                .setGitDir(BK_REPO.resolve(".git").toFile())
-                .readEnvironment().findGitDir().build();
-        return r.getConfig().getString("remote", "origin", "url");
+    private static void runPipelineFor(ProjectConfig cfg) throws Exception {
+        LOG.info("▶ Avvio pipeline dataset per {}", cfg.repo());
+
+        // 1) Prepara cartella di cache per questo progetto
+        Path cacheDir = Paths.get("cache", cfg.repo().toLowerCase());
+        Files.createDirectories(cacheDir);
+
+        // 2) JIRA tickets + cache
+        BookkeeperFetcher fetcher = new BookkeeperFetcher();
+        List<JiraTicket> tickets = loadOrDownloadTickets(fetcher, cfg, cacheDir);
+
+        // 3) Fetch e dump delle versioni JIRA
+        JiraInjection jira = new JiraInjection(cfg.jiraProject());
+        jira.injectReleases();
+        List<JiraVersion> rawJiraRel = jira.getReleases().stream()
+                .filter(v -> v.getName() != null)
+                .collect(Collectors.toList());
+        dumpJson(cacheDir, cfg.repo().toLowerCase() + "_jira_versions.json", rawJiraRel);
+
+        // 4) Fetch e dump dei tag GitHub
+        List<String> gitTags = PipelineUtils.fetchGitHubTags(cfg.owner(), cfg.repo());
+        dumpJson(cacheDir, cfg.repo().toLowerCase() + "_git_tags.json", gitTags);
+
+        // 5) Calcola l’intersezione JIRA↔Git, dump e log
+        Set<String> jiraNorm = rawJiraRel.stream()
+                .map(v -> PipelineUtils.normalize(v.getName()))
+                .collect(Collectors.toSet());
+        List<String> releases = gitTags.stream()
+                .filter(t -> jiraNorm.contains(PipelineUtils.normalize(t)))
+                .sorted(PipelineUtils::compareSemver)
+                .collect(Collectors.toList());
+        if (releases.isEmpty()) {
+            releases = List.of("HEAD");
+        }
+        dumpJson(cacheDir, cfg.repo().toLowerCase() + "_releases_intersection.json", releases);
+        LOG.info("Release da elaborare per {}: {}", cfg.repo(), releases);
+
+        // 6) Clona/Aggiorna repository
+        new GitInjection(
+                PipelineUtils.repoRemoteUrl(cfg.localPath()),
+                cfg.localPath().toFile(),
+                new ArrayList<>()
+        ).injectCommits();
+
+        // 7) Calcolo buggy-info (col nuovo computeOrLoad)
+        BuggyInfo bugInfo = BuggyMethodExtractor.computeOrLoad(
+                cfg.localPath().toFile(),
+                tickets,
+                cfg.repo().toLowerCase(),
+                cacheDir
+        );
+
+        // 8) Feature extraction e CSV
+        FeatureExtractor fx = new FeatureExtractor();
+        String csvBase = "dataset_" + cfg.repo().toLowerCase() + ".csv";
+        boolean first = true;
+        for (String tag : releases) {
+            LOG.info("   • elaboro {}@{}", cfg.repo(), tag);
+            Map<File, Map<String, FeatureExtractor.MethodFeatures>> feats;
+            if ("HEAD".equals(tag)) {
+                feats = PipelineUtils.walkAndExtract(
+                        cfg.localPath().toFile(), fx, DEFAULT_FILTERS
+                );
+            } else {
+                Path tmp = PipelineUtils.downloadAndUnzip(cfg.owner(), cfg.repo(), tag);
+                Path proj = PipelineUtils.findSingleSubdir(tmp);
+                feats = PipelineUtils.walkAndExtract(proj.toFile(), fx, DEFAULT_FILTERS);
+                PipelineUtils.deleteDirectoryRecursively(tmp);
+            }
+            new CsvGenerator(tag, !first)
+                    .generateCsv(feats, bugInfo, csvBase);
+            first = false;
+        }
+
+        // 9) Dedup + filtro + riduzione cross-release
+        Path raw      = Paths.get(csvBase);
+        Path dedup    = Paths.get("dataset_" + cfg.repo() + "_dedup.csv");
+        Path filtered = Paths.get("dataset_" + cfg.repo() + "_filtered.csv");
+        Path finalCsv = Paths.get(cfg.repo() + "_dataset_finale.csv");
+
+        CsvDeduplicator.deduplicate(raw, dedup);
+        if (cfg.releaseCut() != null) {
+            CsvDeduplicator.dedupAndFilterUpTo(dedup, filtered, cfg.releaseCut());
+        } else {
+            Files.copy(dedup, filtered, StandardCopyOption.REPLACE_EXISTING);
+        }
+        FinalCsvReducer.reduceDuplicates(filtered, finalCsv);
+
+        LOG.info("✅ Pipeline {} completata, output: {}", cfg.repo(), finalCsv.toAbsolutePath());
     }
 
     @SuppressWarnings("unchecked")
-    private static List<JiraTicket> loadOrDownloadTickets(BookkeeperFetcher f) throws Exception {
-        Path json = Paths.get("bookkeeper_jira_tickets.json");
+    private static List<JiraTicket> loadOrDownloadTickets(
+            BookkeeperFetcher fetcher,
+            ProjectConfig cfg,
+            Path cacheDir
+    ) throws Exception {
+        Path json = cacheDir.resolve(cfg.repo().toLowerCase() + "_jira_tickets.json");
         Jsonb jb = JsonbBuilder.create(new JsonbConfig().withFormatting(true));
+
         if (Files.exists(json)) {
-            try (Reader r = Files.newBufferedReader(json)) {
+            LOG.info("▶ Carico cache ticket da {}", json);
+            try (Reader r = Files.newBufferedReader(json, StandardCharsets.UTF_8)) {
                 Type t = new ArrayList<JiraTicket>() {}.getClass().getGenericSuperclass();
                 return (List<JiraTicket>) jb.fromJson(r, t);
             }
         }
-        List<JiraTicket> ts = f.fetchAllJiraTickets(
+
+        LOG.info("▶ Download ticket JIRA per {}", cfg.repo());
+        List<JiraTicket> ts = fetcher.fetchAllJiraTickets(
                 System.getenv("JIRA_USER"), System.getenv("JIRA_PASS")
         );
-        f.writeTicketsToJsonFile(ts, json.toString());
+        fetcher.writeTicketsToJsonFile(ts, json.toString());
+        LOG.info("✅ Ticket salvati in {}", json);
         return ts;
     }
 
-    private static List<String> fetchGitHubTags(String owner, String repo) throws IOException {
-        HttpUrl url = HttpUrl.parse(
-                "https://api.github.com/repos/" + owner + "/" + repo + "/tags"
-        ).newBuilder().addQueryParameter("per_page", "100").build();
-        Request req = new Request.Builder().url(url).build();
-        try (Response resp = http.newCall(req).execute()) {
-            if (!resp.isSuccessful()) throw new IOException("GitHub tags failed: " + resp);
-            JsonArray arr = gson.fromJson(resp.body().charStream(), JsonArray.class);
-            List<String> tags = new ArrayList<>();
-            for (JsonElement el : arr) {
-                tags.add(el.getAsJsonObject().get("name").getAsString());
-            }
-            return tags;
+    private static void dumpJson(Path dir, String filename, Object data) throws Exception {
+        Path file = dir.resolve(filename);
+        try (Writer w = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+            Jsonb jsonb = JsonbBuilder.create(new JsonbConfig().withFormatting(true));
+            jsonb.toJson(data, w);
         }
-    }
-
-    private static Path downloadAndUnzip(String owner, String repo, String tag) throws IOException {
-        HttpUrl url = HttpUrl.parse(
-                "https://api.github.com/repos/" + owner + "/" + repo + "/zipball/" + tag
-        );
-        Request req = new Request.Builder().url(url).build();
-        Path tmp = Files.createTempDirectory(repo + "-" + tag + "-");
-        try (Response resp = http.newCall(req).execute();
-             InputStream in = resp.body().byteStream();
-             ZipInputStream zip = new ZipInputStream(in)) {
-            ZipEntry e;
-            while ((e = zip.getNextEntry()) != null) {
-                Path out = tmp.resolve(e.getName());
-                if (e.isDirectory()) Files.createDirectories(out);
-                else {
-                    Files.createDirectories(out.getParent());
-                    Files.copy(zip, out);
-                }
-                zip.closeEntry();
-            }
-        }
-        return tmp;
-    }
-
-    private static Path findSingleSubdir(Path dir) throws IOException {
-        try (Stream<Path> s = Files.list(dir)) {
-            List<Path> subs = s.filter(Files::isDirectory).collect(Collectors.toList());
-            return subs.size() == 1 ? subs.get(0) : dir;
-        }
-    }
-
-    private static void deleteDirectoryRecursively(Path dir) throws IOException {
-        try (Stream<Path> s = Files.walk(dir)) {
-            s.sorted(Comparator.reverseOrder())
-                    .map(Path::toFile)
-                    .forEach(File::delete);
-        }
-    }
-
-    // walkAndExtract con tutti i filtri
-    private static Map<File, Map<String, FeatureExtractor.MethodFeatures>> walkAndExtract(
-            File dir, FeatureExtractor fx) throws IOException {
-        Map<File, Map<String, FeatureExtractor.MethodFeatures>> m = new HashMap<>();
-        try (Stream<Path> ps = Files.walk(dir.toPath())) {
-            ps.filter(Files::isRegularFile)
-                    .filter(p -> p.toString().endsWith(".java"))
-                    .filter(p -> !TEST_DIR_MATCHER.matches(p))
-                    .filter(p -> !TEST_CLASS_MATCHER.matches(p))
-                    .filter(p -> !MAIN_TESTS_DIR_MATCHER.matches(p))
-                    .filter(p -> !IGNORE_MATCHER.matches(p))
-                    .filter(p -> !DTO_IGNORE.matches(p))
-                    .filter(p -> !DEMO_DIR_MATCHER.matches(p))
-                    .filter(p -> !DEMO_CLASS_MATCHER.matches(p))
-                    .filter(p -> !MOCK_DIR_MATCHER.matches(p))
-                    .filter(p -> !MOCK_CLASS_MATCHER.matches(p))
-                    .filter(p -> !STUB_CLASS_MATCHER.matches(p))
-                    .filter(p -> !TESTDATA_CLASS_MATCHER.matches(p))
-                    .filter(p -> !BENCH_DIR_MATCHER.matches(p))
-                    .filter(p -> !BENCH_CLASS_MATCHER.matches(p))
-                    .map(Path::toFile)
-                    .forEach(f -> {
-                        try { m.put(f, fx.extractFromFile(f)); }
-                        catch (Exception ignored) {}
-                    });
-        }
-        return m;
-    }
-
-    private static String normalize(String tag) {
-        return tag.replaceFirst("^(?:v|release-)", "");
-    }
-
-    public static int compareSemver(String a, String b) {
-        String[] pa = normalize(a).split("\\.");
-        String[] pb = normalize(b).split("\\.");
-        int n = Math.max(pa.length, pb.length);
-        for (int i = 0; i < n; i++) {
-            int ai = i < pa.length ? Integer.parseInt(pa[i]) : 0;
-            int bi = i < pb.length ? Integer.parseInt(pb[i]) : 0;
-            if (ai != bi) return Integer.compare(ai, bi);
-        }
-        return 0;
+        LOG.info("✅ Dump salvato in {}", file);
     }
 }

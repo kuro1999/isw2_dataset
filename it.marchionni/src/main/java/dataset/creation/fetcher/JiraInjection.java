@@ -9,6 +9,9 @@ import jakarta.json.bind.annotation.JsonbProperty;
 import jakarta.json.bind.adapter.JsonbAdapter;
 import okhttp3.*;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -21,6 +24,8 @@ import java.util.stream.Collectors;
  * JiraVersion e JiraTicket. Gestisce date plain e ISO offsets.
  */
 public class JiraInjection {
+
+    private static final Logger log = LoggerFactory.getLogger(JiraInjection.class);
 
     private static final String VERSIONS_API =
             "https://issues.apache.org/jira/rest/api/latest/project/%s";
@@ -40,8 +45,9 @@ public class JiraInjection {
         this.jsonb = JsonbBuilder.create(cfg);
     }
 
-    /** 1) Fetch e ordina tutte le release */
+    /** 1) Fetch, filtra e ordina tutte le release */
     public void injectReleases() throws IOException {
+        // 1A) Chiamata JIRA
         Request req = new Request.Builder()
                 .url(String.format(VERSIONS_API, projKey))
                 .header("Accept", "application/json")
@@ -52,12 +58,42 @@ public class JiraInjection {
                 throw new IOException("JIRA versions API HTTP " + resp.code());
 
             VersionsResponse vr = jsonb.fromJson(resp.body().string(), VersionsResponse.class);
-            if (vr.versions != null) releases = vr.versions;
+            if (vr.versions != null) {
+                releases = vr.versions;
+            }
         }
 
-        releases.sort(Comparator.comparing(JiraVersion::getReleaseDate));
-        for (int i = 0; i < releases.size(); i++) releases.get(i).setId(i + 1);
-        System.out.printf("→ caricate %d release%n", releases.size());
+        // 1B) Rimuovo versioni senza nome o data
+        List<JiraVersion> filtered = releases.stream()
+                .filter(v -> v.getName() != null && v.getReleaseDate() != null)
+                .collect(Collectors.toList());
+        if (filtered.size() < releases.size()) {
+            log.warn("Scartate {} versioni JIRA incomplete (name o releaseDate null) per {}",
+                    releases.size() - filtered.size(), projKey);
+        }
+
+        // 1C) Rimuovo quelle non in puro semver numerico (es. "0-beta3")
+        List<JiraVersion> semverOnly = filtered.stream()
+                .filter(v -> v.getName().matches("\\d+(?:\\.\\d+)*"))
+                .collect(Collectors.toList());
+        if (semverOnly.size() < filtered.size()) {
+            log.warn("Scartate {} versioni JIRA non numeric‐semver per {}",
+                    filtered.size() - semverOnly.size(), projKey);
+        }
+
+        // 1D) Ordino per data (nulls già eliminate)
+        semverOnly.sort(Comparator.comparing(
+                JiraVersion::getReleaseDate,
+                Comparator.nullsLast(Comparator.naturalOrder())
+        ));
+
+        // 1E) Assegno ID sequenziali
+        for (int i = 0; i < semverOnly.size(); i++) {
+            semverOnly.get(i).setId(i + 1);
+        }
+
+        releases = semverOnly;
+        log.info("→ caricate {} release JIRA per {}", releases.size(), projKey);
     }
 
     /** 2) Find first release on or after date */
@@ -105,12 +141,10 @@ public class JiraInjection {
         } while (startAt < total);
 
         ticketsWithIssues.sort(Comparator.comparing(JiraTicket::getResolutionDate));
-        System.out.printf("→ estratti %d ticket Bug/Fixed%n", ticketsWithIssues.size());
+        log.info("→ estratti {} ticket Bug/Fixed per {}", ticketsWithIssues.size(), projKey);
     }
 
-    /**
-     * Ritorna la lista delle release JIRA caricate
-     */
+    /** Ritorna la lista delle release JIRA caricate */
     public List<JiraVersion> getReleases() {
         return Collections.unmodifiableList(releases);
     }

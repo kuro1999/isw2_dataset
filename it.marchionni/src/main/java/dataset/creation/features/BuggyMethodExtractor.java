@@ -25,6 +25,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -38,7 +40,6 @@ import java.util.stream.Collectors;
 public class BuggyMethodExtractor {
 
     private static final Logger logger = LoggerFactory.getLogger(BuggyMethodExtractor.class);
-    private static final String CACHE_FILE = "buggy_info_cache.json";
 
     public static class BuggyInfo {
         public final Set<String> buggyMethods;
@@ -176,39 +177,53 @@ public class BuggyMethodExtractor {
         public Map<String,Integer> maxChurnOfMethod;
     }
 
-    public static BuggyInfo computeOrLoad(File repoDir, List<JiraTicket> tickets) throws Exception {
-        File cache = new File(CACHE_FILE);
-        if (cache.exists()) {
-            logger.info("▶ Carico cache da {}", CACHE_FILE);
-            try (Reader r = new FileReader(cache)) {
+    /**
+     * Legge o calcola la cache dei dati buggy per un progetto specifico.
+     *
+     * @param repoDir     la directory Git del progetto
+     * @param tickets     lista di ticket JIRA
+     * @param projectKey  chiave univoca del progetto (es. "openjpa")
+     * @param cacheDir    cartella dove salvare/leggere i file di cache
+     */
+    public static BuggyInfo computeOrLoad(File repoDir,
+                                          List<JiraTicket> tickets,
+                                          String projectKey,
+                                          Path cacheDir) throws Exception {
+        Files.createDirectories(cacheDir);
+        Path cacheFile = cacheDir.resolve(projectKey + "_buggy_info_cache.json");
+
+        if (Files.exists(cacheFile)) {
+            logger.info("▶ Carico cache da {}", cacheFile);
+            try (Reader r = Files.newBufferedReader(cacheFile, StandardCharsets.UTF_8)) {
                 Jsonb jsonb = JsonbBuilder.create();
                 BuggyInfoDTO dto = jsonb.fromJson(r, BuggyInfoDTO.class);
                 return BuggyInfo.fromDto(dto);
             }
         }
-        logger.info("▶ Nessuna cache: avvio calcolo metodi buggy + churn/else");
+
+        logger.info("▶ Nessuna cache: avvio calcolo metodi buggy + churn/else per {}", projectKey);
         BuggyInfo info = computeBuggyMethods(repoDir, tickets);
-        try (Writer w = new FileWriter(cache)) {
+
+        try (Writer w = Files.newBufferedWriter(cacheFile, StandardCharsets.UTF_8)) {
             Jsonb jsonb = JsonbBuilder.create();
             jsonb.toJson(info.toDto(), w);
-            logger.info("✅ Cache salvata in {}", CACHE_FILE);
+            logger.info("✅ Cache salvata in {}", cacheFile);
         }
         return info;
     }
 
-    private static BuggyInfo computeBuggyMethods(File repoDir, List<JiraTicket> tickets) throws Exception {
+    private static BuggyInfo computeBuggyMethods(File repoDir,
+                                                 List<JiraTicket> tickets) throws Exception {
         Repository repository = new FileRepositoryBuilder()
                 .setGitDir(new File(repoDir, ".git"))
                 .readEnvironment().findGitDir().build();
         Git git = new Git(repository);
 
-        Set<String> defectKeys = new HashSet<>();
-        for (JiraTicket t : tickets) {
-            if ("Fixed".equalsIgnoreCase(t.getResolution())
-                    && ("Closed".equalsIgnoreCase(t.getStatus()) || "Resolved".equalsIgnoreCase(t.getStatus()))) {
-                defectKeys.add(t.getKey());
-            }
-        }
+        Set<String> defectKeys = tickets.stream()
+                .filter(t -> "Fixed".equalsIgnoreCase(t.getResolution())
+                        && ("Closed".equalsIgnoreCase(t.getStatus()) || "Resolved".equalsIgnoreCase(t.getStatus())))
+                .map(t -> t.getKey())
+                .collect(Collectors.toSet());
         logger.info("» Ticket fix rilevati: {}", defectKeys.size());
 
         Set<ObjectId> fixCommits = new HashSet<>();
@@ -222,6 +237,7 @@ public class BuggyMethodExtractor {
         }
         logger.info("» Commit di fix trovati: {}", fixCommits.size());
 
+        // mappe e strutture di supporto
         Set<String> buggyMethods = new HashSet<>();
         Map<String,Integer> churnMap = new HashMap<>();
         Map<String,Integer> elseAddMap = new HashMap<>();
@@ -266,7 +282,8 @@ public class BuggyMethodExtractor {
                         for (MethodDeclaration md : cu.findAll(MethodDeclaration.class)) {
                             md.getRange().ifPresent(r -> {
                                 if (e.getBeginB()+1 <= r.end.line && e.getEndB() >= r.begin.line) {
-                                    String id = new File(path).getName() + "#" + md.getDeclarationAsString(false,false,false);
+                                    String id = new File(path).getName() + "#" +
+                                            md.getDeclarationAsString(false,false,false);
                                     buggyMethods.add(id);
                                     churnMap.merge(id, delta, Integer::sum);
                                     addList.computeIfAbsent(id, k->new ArrayList<>()).add(added);
@@ -275,11 +292,18 @@ public class BuggyMethodExtractor {
                                     authorMap.computeIfAbsent(id, k->new HashSet<>()).add(author);
                                     histories.merge(id, 1, Integer::sum);
 
-                                    for (int ln=e.getBeginB()+1; ln<=e.getEndB(); ln++) if (newLines.get(ln-1).contains("else")) elseAddMap.merge(id,1,Integer::sum);
-                                    for (int ln=e.getBeginA()+1; ln<=e.getEndA(); ln++) if (oldLines.get(ln-1).contains("else")) elseDelMap.merge(id,1,Integer::sum);
+                                    for (int ln=e.getBeginB()+1; ln<=e.getEndB(); ln++)
+                                        if (newLines.get(ln-1).contains("else"))
+                                            elseAddMap.merge(id,1,Integer::sum);
+
+                                    for (int ln=e.getBeginA()+1; ln<=e.getEndA(); ln++)
+                                        if (oldLines.get(ln-1).contains("else"))
+                                            elseDelMap.merge(id,1,Integer::sum);
+
                                     for (int ln=e.getBeginB()+1; ln<=e.getEndB(); ln++) {
-                                        String l=newLines.get(ln-1);
-                                        if (l.contains("if")||l.contains("case")) condMap.merge(id,1,Integer::sum);
+                                        String l = newLines.get(ln-1);
+                                        if (l.contains("if") || l.contains("case"))
+                                            condMap.merge(id,1,Integer::sum);
                                     }
                                 }
                             });
@@ -288,24 +312,28 @@ public class BuggyMethodExtractor {
                 }
             }
         }
-        df.close(); repository.close();
+        df.close();
+        repository.close();
 
+        // calcolo medie e massimi
         Map<String,Double> avgAdd = new HashMap<>();
-        Map<String,Integer> mAdd = new HashMap<>();
+        Map<String,Integer> maxAdd = new HashMap<>();
         Map<String,Double> avgDel = new HashMap<>();
-        Map<String,Integer> mDel = new HashMap<>();
+        Map<String,Integer> maxDel = new HashMap<>();
         Map<String,Double> avgCh = new HashMap<>();
-        Map<String,Integer> mCh = new HashMap<>();
+        Map<String,Integer> maxCh = new HashMap<>();
         for (String id : churnList.keySet()) {
             List<Integer> adds = addList.getOrDefault(id, List.of());
             avgAdd.put(id, adds.stream().mapToInt(x->x).average().orElse(0));
-            mAdd.put(id, adds.stream().mapToInt(x->x).max().orElse(0));
+            maxAdd.put(id, adds.stream().mapToInt(x->x).max().orElse(0));
+
             List<Integer> dels = delList.getOrDefault(id, List.of());
             avgDel.put(id, dels.stream().mapToInt(x->x).average().orElse(0));
-            mDel.put(id, dels.stream().mapToInt(x->x).max().orElse(0));
+            maxDel.put(id, dels.stream().mapToInt(x->x).max().orElse(0));
+
             List<Integer> chs = churnList.get(id);
             avgCh.put(id, chs.stream().mapToInt(x->x).average().orElse(0));
-            mCh.put(id, chs.stream().mapToInt(x->x).max().orElse(0));
+            maxCh.put(id, chs.stream().mapToInt(x->x).max().orElse(0));
         }
 
         return new BuggyInfo(
@@ -315,8 +343,9 @@ public class BuggyMethodExtractor {
                 elseDelMap,
                 condMap,
                 histories,
-                authorMap.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e->e.getValue().size())),
-                avgAdd, mAdd, avgDel, mDel, avgCh, mCh
+                authorMap.entrySet().stream()
+                        .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().size())),
+                avgAdd, maxAdd, avgDel, maxDel, avgCh, maxCh
         );
     }
 

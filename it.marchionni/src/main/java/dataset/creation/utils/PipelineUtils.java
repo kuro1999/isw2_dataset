@@ -1,7 +1,7 @@
 package dataset.creation.utils;
 
 import dataset.creation.features.FeatureExtractor;
-import dataset.creation.fetcher.BookkeeperFetcher;
+import dataset.creation.fetcher.Fetcher;
 import dataset.creation.fetcher.model.JiraTicket;
 
 import jakarta.json.bind.Jsonb;
@@ -223,7 +223,7 @@ public final class PipelineUtils {
        ========================================================= */
 
     /** Legge da cache o scarica da JIRA tutti i ticket. */
-    public static List<JiraTicket> loadOrDownloadTickets(BookkeeperFetcher f) throws Exception {
+    public static List<JiraTicket> loadOrDownloadTickets(Fetcher f) throws Exception {
         String base = f.getClass().getSimpleName().equals("BookkeeperFetcher")
                 ? "bookkeeper"
                 : f.getClass().getSimpleName().toLowerCase();
@@ -241,7 +241,7 @@ public final class PipelineUtils {
         List<JiraTicket> ts = f.fetchAllJiraTickets(
                 System.getenv("JIRA_USER"), System.getenv("JIRA_PASS")
         );
-        f.writeTicketsToJsonFile(ts, json.toString());
+        f.writeTicketsToJsonFile(ts, Path.of(json.toString()));
         return ts;
     }
 }

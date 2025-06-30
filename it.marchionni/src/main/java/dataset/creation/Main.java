@@ -1,6 +1,6 @@
 package dataset.creation;
 
-import dataset.creation.fetcher.BookkeeperFetcher;
+import dataset.creation.fetcher.Fetcher;
 import dataset.creation.fetcher.JiraInjection;
 import dataset.creation.fetcher.GitInjection;
 import dataset.creation.fetcher.model.JiraTicket;
@@ -39,10 +39,8 @@ public class Main {
         // ① Definisci qui i progetti da processare:
         List<ProjectConfig> projects = List.of(
                 new ProjectConfig("apache", "openjpa", "OPENJPA",
-                        Path.of("/home/edo/isw2/openjpa_isw2"),
-                        null, Map.of()),
+                        "2.0.0", Map.of()),
                 new ProjectConfig("apache", "bookkeeper", "BOOKKEEPER",
-                        Path.of("/home/edo/isw2/bookkeeper_isw2"),
                         "4.2.1", Map.of())
         );
 
@@ -58,12 +56,27 @@ public class Main {
     private static void runPipelineFor(ProjectConfig cfg) throws Exception {
         LOG.info("▶ Avvio pipeline dataset per {}", cfg.repo());
 
-        // 1) Prepara cartella di cache per questo progetto
-        Path cacheDir = Paths.get("cache", cfg.repo().toLowerCase());
+        // 1) Prepara cartella di cache e repository locale
+        Path baseDir = Paths.get(System.getProperty("user.dir"));
+        Path cacheDir = baseDir.resolve("cache").resolve(cfg.repo().toLowerCase());
         Files.createDirectories(cacheDir);
 
+        // 2) Repository Git: clona solo se non esiste già
+        Path repoDir = baseDir.resolve(cfg.repo().toLowerCase() + "_repo");
+        if (!Files.exists(repoDir)) {
+            LOG.info("▶ Cloning repository {}...", cfg.repo());
+            GitInjection git = new GitInjection(
+                    "https://github.com/" + cfg.owner() + "/" + cfg.repo() + ".git",
+                    repoDir.toFile(),
+                    new ArrayList<>()
+            );
+            git.injectCommits();  // Clona il repo
+        } else {
+            LOG.info("▶ Repository {} già presente, skip cloning", repoDir);
+        }
+
         // 2) JIRA tickets + cache
-        BookkeeperFetcher fetcher = new BookkeeperFetcher();
+        Fetcher fetcher = new Fetcher(cfg.jiraProject());
         List<JiraTicket> tickets = loadOrDownloadTickets(fetcher, cfg, cacheDir);
 
         // 3) Fetch e dump delle versioni JIRA
@@ -78,7 +91,7 @@ public class Main {
         List<String> gitTags = PipelineUtils.fetchGitHubTags(cfg.owner(), cfg.repo());
         dumpJson(cacheDir, cfg.repo().toLowerCase() + "_git_tags.json", gitTags);
 
-        // 5) Calcola l’intersezione JIRA↔Git, dump e log
+        // 5) Calcola intersezione JIRA↔Git, dump e log
         Set<String> jiraNorm = rawJiraRel.stream()
                 .map(v -> PipelineUtils.normalize(v.getName()))
                 .collect(Collectors.toSet());
@@ -92,16 +105,9 @@ public class Main {
         dumpJson(cacheDir, cfg.repo().toLowerCase() + "_releases_intersection.json", releases);
         LOG.info("Release da elaborare per {}: {}", cfg.repo(), releases);
 
-        // 6) Clona/Aggiorna repository
-        new GitInjection(
-                PipelineUtils.repoRemoteUrl(cfg.localPath()),
-                cfg.localPath().toFile(),
-                new ArrayList<>()
-        ).injectCommits();
-
-        // 7) Calcolo buggy-info (col nuovo computeOrLoad)
+        // 6) Calcolo buggy‐info (cache)
         BuggyInfo bugInfo = BuggyMethodExtractor.computeOrLoad(
-                cfg.localPath().toFile(),
+                repoDir.toFile(),
                 tickets,
                 cfg.repo().toLowerCase(),
                 cacheDir
@@ -116,7 +122,7 @@ public class Main {
             Map<File, Map<String, FeatureExtractor.MethodFeatures>> feats;
             if ("HEAD".equals(tag)) {
                 feats = PipelineUtils.walkAndExtract(
-                        cfg.localPath().toFile(), fx, DEFAULT_FILTERS
+                        repoDir.toFile(), fx, DEFAULT_FILTERS
                 );
             } else {
                 Path tmp = PipelineUtils.downloadAndUnzip(cfg.owner(), cfg.repo(), tag);
@@ -129,7 +135,7 @@ public class Main {
             first = false;
         }
 
-        // 9) Dedup + filtro + riduzione cross-release
+        // 9) Dedup + filtro + riduzione cross‐release
         Path raw      = Paths.get(csvBase);
         Path dedup    = Paths.get("dataset_" + cfg.repo() + "_dedup.csv");
         Path filtered = Paths.get("dataset_" + cfg.repo() + "_filtered.csv");
@@ -148,7 +154,7 @@ public class Main {
 
     @SuppressWarnings("unchecked")
     private static List<JiraTicket> loadOrDownloadTickets(
-            BookkeeperFetcher fetcher,
+            Fetcher fetcher,
             ProjectConfig cfg,
             Path cacheDir
     ) throws Exception {
@@ -167,7 +173,7 @@ public class Main {
         List<JiraTicket> ts = fetcher.fetchAllJiraTickets(
                 System.getenv("JIRA_USER"), System.getenv("JIRA_PASS")
         );
-        fetcher.writeTicketsToJsonFile(ts, json.toString());
+        fetcher.writeTicketsToJsonFile(ts, Path.of(json.toString()));
         LOG.info("✅ Ticket salvati in {}", json);
         return ts;
     }

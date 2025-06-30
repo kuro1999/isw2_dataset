@@ -56,4 +56,21 @@ public class GitTagUtil {
         log.info("→ Salvati tag Git remoti in {}: {}", outputFile, tags);
         return tags;
     }
+    public static List<String> extractOrderedTags(Path repoDir) {
+        try (Git git = Git.open(repoDir.toFile())) {
+            List<String> tags = git.tagList().call().stream()
+                    .map(ref -> ref.getName().replace("refs/tags/", ""))
+                    .distinct()
+                    .collect(Collectors.toList());
+
+            tags.sort(PipelineUtils::compareSemver);
+
+            log.info("→ Tag trovati localmente in {}: {}", repoDir, tags);
+            return tags;
+        } catch (Exception e) {
+            log.error("❌ Errore durante l'estrazione dei tag locali da {}", repoDir, e);
+            return List.of(); // oppure solleva eccezione se preferisci
+        }
+    }
+
 }

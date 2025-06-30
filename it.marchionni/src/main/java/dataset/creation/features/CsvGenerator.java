@@ -5,8 +5,8 @@ import org.apache.commons.csv.CSVPrinter;
 
 import java.io.File;
 import java.io.FileWriter;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Genera CSV includendo:
@@ -14,7 +14,7 @@ import java.util.Set;
  *  - churn metrics (total, avg, max)
  *  - change details (elseAdded, elseDeleted, condChanges)
  *  - history details (n° commit, n° autori)
- *  - label buggy
+ *  - label buggy (normalizzato per whitespace)
  */
 public class CsvGenerator {
 
@@ -33,7 +33,7 @@ public class CsvGenerator {
     ) throws Exception {
 
         // Header extended with new columns
-        String[] headers = append ? null : new String[] {
+        String[] headers = append ? null : new String[]{
                 "Version", "File Name", "Method Name",
                 "LOC", "CognitiveComplexity", "CyclomaticComplexity",
                 "CodeSmells", "NestingDepth", "ParameterCount",
@@ -49,30 +49,38 @@ public class CsvGenerator {
                 : CSVFormat.DEFAULT.withHeader(headers);
 
         try (CSVPrinter csv = new CSVPrinter(new FileWriter(outputCsv, append), fmt)) {
-            Set<String> buggySet = info.buggyMethods;
+
+            // Normalize buggy IDs by removing all whitespace
+            Set<String> normalizedBuggy = info.buggyMethods.stream()
+                    .map(id -> id.replaceAll("\\s+", ""))
+                    .collect(Collectors.toSet());
 
             for (Map.Entry<File, Map<String, FeatureExtractor.MethodFeatures>> fe : featuresPerFile.entrySet()) {
                 String fileName = fe.getKey().getName();
                 for (Map.Entry<String, FeatureExtractor.MethodFeatures> me : fe.getValue().entrySet()) {
                     String sig = me.getKey();
                     String id  = fileName + "#" + sig;
+                    String normId = id.replaceAll("\\s+", "");
+
                     FeatureExtractor.MethodFeatures f = me.getValue();
 
                     // fetch all metrics, with default fallbacks
                     int   totalChurn = info.churnOfMethod.getOrDefault(id, 0);
                     double avgAdd    = info.avgAddedOfMethod.getOrDefault(id, 0.0);
-                    int   maxAdd    = info.maxAddedOfMethod.getOrDefault(id, 0);
+                    int   maxAdd     = info.maxAddedOfMethod.getOrDefault(id, 0);
                     double avgDel    = info.avgDeletedOfMethod.getOrDefault(id, 0.0);
-                    int   maxDel    = info.maxDeletedOfMethod.getOrDefault(id, 0);
-                    double avgCh    = info.avgChurnOfMethod.getOrDefault(id, 0.0);
-                    int   maxCh    = info.maxChurnOfMethod.getOrDefault(id, 0);
-                    int   elseAdd  = info.elseAddedOfMethod.getOrDefault(id, 0);
-                    int   elseDel  = info.elseDeletedOfMethod.getOrDefault(id, 0);
-                    int   condCh   = info.condChangesOfMethod.getOrDefault(id, 0);
-                    int   histories= info.methodHistoriesOfMethod.getOrDefault(id, 0);
-                    int   authors  = info.authorsOfMethod.getOrDefault(id, 0);
-                    int   decision = f.decisionPoints;
-                    boolean isBuggy= buggySet.contains(id);
+                    int   maxDel     = info.maxDeletedOfMethod.getOrDefault(id, 0);
+                    double avgCh     = info.avgChurnOfMethod.getOrDefault(id, 0.0);
+                    int   maxCh      = info.maxChurnOfMethod.getOrDefault(id, 0);
+                    int   elseAdd    = info.elseAddedOfMethod.getOrDefault(id, 0);
+                    int   elseDel    = info.elseDeletedOfMethod.getOrDefault(id, 0);
+                    int   condCh     = info.condChangesOfMethod.getOrDefault(id, 0);
+                    int   histories  = info.methodHistoriesOfMethod.getOrDefault(id, 0);
+                    int   authors    = info.authorsOfMethod.getOrDefault(id, 0);
+                    int   decision   = f.decisionPoints;
+
+                    // Determine buggy via normalized set
+                    boolean isBuggy = normalizedBuggy.contains(normId);
 
                     csv.printRecord(
                             version,

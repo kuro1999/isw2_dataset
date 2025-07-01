@@ -15,6 +15,7 @@ public class ComplexityMetrics {
     public int getAuthorCount() {
         return authorCount;
     }
+
     public void setHistoryCount(int historyCount) {
         this.historyCount = historyCount;
     }

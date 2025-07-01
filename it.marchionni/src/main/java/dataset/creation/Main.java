@@ -32,6 +32,7 @@ import java.util.stream.Collectors;
 import static dataset.creation.utils.PipelineUtils.DEFAULT_FILTERS;
 
 public class Main {
+    public static final String DATASET ="dataset_";
 
     private static final Logger LOG = LoggerFactory.getLogger(Main.class);
 
@@ -115,7 +116,7 @@ public class Main {
 
         // 8) Feature extraction e CSV
         FeatureExtractor fx = new FeatureExtractor();
-        String csvBase = "dataset_" + cfg.repo().toLowerCase() + ".csv";
+        String csvBase = DATASET + cfg.repo().toLowerCase() + ".csv";
         boolean first = true;
         for (String tag : releases) {
             LOG.info("   • elaboro {}@{}", cfg.repo(), tag);
@@ -137,8 +138,8 @@ public class Main {
 
         // 9) Dedup + filtro + riduzione cross‐release
         Path raw      = Paths.get(csvBase);
-        Path dedup    = Paths.get("dataset_" + cfg.repo() + "_dedup.csv");
-        Path filtered = Paths.get("dataset_" + cfg.repo() + "_filtered.csv");
+        Path dedup    = Paths.get(DATASET + cfg.repo() + "_dedup.csv");
+        Path filtered = Paths.get(DATASET + cfg.repo() + "_filtered.csv");
         Path finalCsv = Paths.get(cfg.repo() + "_dataset_finale.csv");
 
         CsvDeduplicator.deduplicate(raw, dedup);

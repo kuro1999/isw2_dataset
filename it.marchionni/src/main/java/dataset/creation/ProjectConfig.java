@@ -1,6 +1,5 @@
 package dataset.creation;
 
-import java.nio.file.Path;
 import java.util.Map;
 import java.util.Objects;
 

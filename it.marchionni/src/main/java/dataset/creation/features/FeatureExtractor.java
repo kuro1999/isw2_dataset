@@ -13,7 +13,6 @@ import net.sourceforge.pmd.RuleSets;
 import net.sourceforge.pmd.SourceCodeProcessor;
 import net.sourceforge.pmd.lang.LanguageRegistry;
 import net.sourceforge.pmd.lang.java.JavaLanguageModule;
-import net.sourceforge.pmd.util.datasource.FileDataSource;
 
 import java.io.File;
 import java.util.HashMap;
@@ -53,7 +52,8 @@ public class FeatureExtractor {
         ctx.setReport(report);
 
         new SourceCodeProcessor(cfg)             // ► OPZIONE 1: InputStream
-                .processSourceCode(new java.io.FileInputStream(javaFile), ruleSets, ctx);        int codeSmellsCount = report.getViolations().size();
+                .processSourceCode(new java.io.FileInputStream(javaFile), ruleSets, ctx);
+        int codeSmellsCount = report.getViolations().size();
 
         /* ------------------------------------------------------------------
            1) Analisi AST con JavaParser per le altre metriche
@@ -66,17 +66,17 @@ public class FeatureExtractor {
 
             int begin = md.getBegin().map(p -> p.line).orElse(0);
             int end   = md.getEnd()  .map(p -> p.line).orElse(begin);
-            f.methodLength   = end - begin + 1;
-            f.parameterCount = md.getParameters().size();
+            f.setMethodLength(end-begin+1);
+            f.setParameterCount(md.getParameters().size());
 
             DepthVisitor dv = new DepthVisitor();
             dv.visit(md, 0);
-            f.nestingDepth        = dv.maxDepth;
-            f.decisionPoints      = dv.decisionPoints;
-            f.cyclomaticComplexity= f.decisionPoints + 1;
-            f.cognitiveComplexity = f.decisionPoints;
+            f.setNestingDepth(dv.maxDepth);
+            f.setDecisionPoints(dv.decisionPoints);
+            f.setCyclomaticComplexity(f.getDecisionPoints() + 1);
+            f.setCognitiveComplexity(f.getDecisionPoints());
 
-            f.codeSmells = codeSmellsCount;
+            f.setCodeSmells(codeSmellsCount);
 
             String sig = md.getDeclarationAsString(false, false, false);
             map.put(sig, f);
@@ -86,7 +86,8 @@ public class FeatureExtractor {
 
     /* ---------------- helper per Nesting Depth & Decision Points ---------- */
     private static class DepthVisitor extends VoidVisitorAdapter<Integer> {
-        int maxDepth = 0, decisionPoints = 0;
+        int maxDepth = 0;
+        int decisionPoints = 0;
 
         @Override public void visit(com.github.javaparser.ast.stmt.IfStmt n, Integer d) {
             super.visit(n, d);
@@ -114,16 +115,5 @@ public class FeatureExtractor {
             decisionPoints++; int nd = d + 1; maxDepth = Math.max(maxDepth, nd);
             n.getStatements().forEach(s -> s.accept(this, nd));
         }
-    }
-
-    /* ---------------- DTO ---------------- */
-    public static class MethodFeatures {
-        public int methodLength;
-        public int parameterCount;
-        public int nestingDepth;
-        public int decisionPoints;
-        public int cyclomaticComplexity;
-        public int cognitiveComplexity;
-        public int codeSmells;
     }
 }

@@ -8,6 +8,12 @@ import java.io.FileWriter;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import dataset.creation.features.metrics.AddDeleteMetrics;
+import dataset.creation.features.metrics.ComplexityMetrics;
+import dataset.creation.features.metrics.ElseMetrics;
+import dataset.creation.features.metrics.MethodMetrics;
+import dataset.creation.features.metrics.StructuralChangeMetrics;
+
 /**
  * Genera CSV includendo:
  *  - static metrics (LOC, complexity, code smells, ecc.)
@@ -26,13 +32,18 @@ public class CsvGenerator {
         this.append = append;
     }
 
+    /** Rimuove tutti gli spazi per creare ID uniformi */
+    private static String normalizeId(String rawId) {
+        return rawId.replaceAll("\\s+", "");
+    }
+
     public void generateCsv(
-            Map<File, Map<String, FeatureExtractor.MethodFeatures>> featuresPerFile,
-            BuggyMethodExtractor.BuggyInfo info,
+            Map<File, Map<String, MethodFeatures>> featuresPerFile,
+            BuggyInfo info,
             String outputCsv
     ) throws Exception {
 
-        // Header extended with new columns
+        // Header extended con le colonne nuove
         String[] headers = append ? null : new String[]{
                 "Version", "File Name", "Method Name",
                 "LOC", "CognitiveComplexity", "CyclomaticComplexity",
@@ -44,54 +55,69 @@ public class CsvGenerator {
                 "Buggy"
         };
 
-        CSVFormat fmt = append
-                ? CSVFormat.DEFAULT
-                : CSVFormat.DEFAULT.withHeader(headers);
+        CSVFormat.Builder builder = CSVFormat.DEFAULT.builder();
+        if (!append) builder.setHeader(headers);
+        CSVFormat fmt = builder.build();
 
         try (CSVPrinter csv = new CSVPrinter(new FileWriter(outputCsv, append), fmt)) {
 
-            // Normalize buggy IDs by removing all whitespace
-            Set<String> normalizedBuggy = info.buggyMethods.stream()
-                    .map(id -> id.replaceAll("\\s+", ""))
+            // Prepara set normalizzato per il label buggy
+            Set<String> normalizedBuggy = info.getBuggyMethods().stream()
+                    .map(CsvGenerator::normalizeId)
                     .collect(Collectors.toSet());
 
-            for (Map.Entry<File, Map<String, FeatureExtractor.MethodFeatures>> fe : featuresPerFile.entrySet()) {
+            for (Map.Entry<File, Map<String, MethodFeatures>> fe : featuresPerFile.entrySet()) {
                 String fileName = fe.getKey().getName();
-                for (Map.Entry<String, FeatureExtractor.MethodFeatures> me : fe.getValue().entrySet()) {
-                    String sig = me.getKey();
-                    String id  = fileName + "#" + sig;
-                    String normId = id.replaceAll("\\s+", "");
 
-                    FeatureExtractor.MethodFeatures f = me.getValue();
+                for (Map.Entry<String, MethodFeatures> me : fe.getValue().entrySet()) {
+                    String signature = me.getKey();
+                    String rawId     = fileName + "#" + signature;
+                    String normId    = normalizeId(rawId);
 
-                    // fetch all metrics, with default fallbacks
-                    int   totalChurn = info.churnOfMethod.getOrDefault(id, 0);
-                    double avgAdd    = info.avgAddedOfMethod.getOrDefault(id, 0.0);
-                    int   maxAdd     = info.maxAddedOfMethod.getOrDefault(id, 0);
-                    double avgDel    = info.avgDeletedOfMethod.getOrDefault(id, 0.0);
-                    int   maxDel     = info.maxDeletedOfMethod.getOrDefault(id, 0);
-                    double avgCh     = info.avgChurnOfMethod.getOrDefault(id, 0.0);
-                    int   maxCh      = info.maxChurnOfMethod.getOrDefault(id, 0);
-                    int   elseAdd    = info.elseAddedOfMethod.getOrDefault(id, 0);
-                    int   elseDel    = info.elseDeletedOfMethod.getOrDefault(id, 0);
-                    int   condCh     = info.condChangesOfMethod.getOrDefault(id, 0);
-                    int   histories  = info.methodHistoriesOfMethod.getOrDefault(id, 0);
-                    int   authors    = info.authorsOfMethod.getOrDefault(id, 0);
-                    int   decision   = f.decisionPoints;
+                    MethodFeatures f = me.getValue();
 
-                    // Determine buggy via normalized set
+                    // Estrai MethodMetrics (o crea uno "vuoto" a zero)
+                    MethodMetrics mm = info.getMetricsFor(normId);
+                    StructuralChangeMetrics structural = mm != null
+                            ? mm.getStructural()
+                            : new StructuralChangeMetrics(0, 0.0, 0, 0);
+                    AddDeleteMetrics addDel = mm != null
+                            ? mm.getAddDelete()
+                            : new AddDeleteMetrics(0.0, 0, 0.0, 0);
+                    ElseMetrics elseM = mm != null
+                            ? mm.getElseMetrics()
+                            : new ElseMetrics(0, 0);
+                    ComplexityMetrics comp = mm != null
+                            ? mm.getComplexity()
+                            : new ComplexityMetrics(0, 0);
+
+                    // Ricava i valori
+                    int totalChurn   = structural.getChurn();
+                    double avgAdd    = addDel.getAvgAdded();
+                    int maxAdd       = addDel.getMaxAdded();
+                    double avgDel    = addDel.getAvgDeleted();
+                    int maxDel       = addDel.getMaxDeleted();
+                    double avgCh     = structural.getAvgChurn();
+                    int maxCh        = structural.getMaxChurn();
+                    int elseAdd      = elseM.getElseAdded();
+                    int elseDel      = elseM.getElseDeleted();
+                    int condCh       = structural.getCondChanges();
+                    int histories    = comp.getHistoryCount();
+                    int authors      = comp.getAuthorCount();
+                    int decisionPts  = f.getDecisionPoints();
+
                     boolean isBuggy = normalizedBuggy.contains(normId);
 
                     csv.printRecord(
                             version,
                             fileName,
-                            sig,
-                            f.methodLength,
-                            f.cognitiveComplexity,
-                            f.cyclomaticComplexity,
-                            f.codeSmells,
-                            f.nestingDepth,
-                            f.parameterCount,
+                            signature,
+                            f.getMethodLength(),
+                            f.getCognitiveComplexity(),
+                            f.getCyclomaticComplexity(),
+                            f.getCodeSmells(),
+                            f.getNestingDepth(),
+                            f.getParameterCount(),
                             totalChurn,
                             String.format("%.2f", avgAdd),
                             maxAdd,
@@ -102,7 +128,7 @@ public class CsvGenerator {
                             elseAdd,
                             elseDel,
                             condCh,
-                            decision,
+                            decisionPts,
                             histories,
                             authors,
                             isBuggy ? "Yes" : "No"

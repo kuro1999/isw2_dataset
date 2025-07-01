@@ -1,5 +1,6 @@
 package dataset.creation;
 
+import com.google.gson.reflect.TypeToken;
 import dataset.creation.fetcher.Fetcher;
 import dataset.creation.fetcher.JiraInjection;
 import dataset.creation.fetcher.GitInjection;
@@ -7,11 +8,12 @@ import dataset.creation.fetcher.model.JiraTicket;
 import dataset.creation.fetcher.model.JiraVersion;
 import dataset.creation.features.FeatureExtractor;
 import dataset.creation.features.BuggyMethodExtractor;
-import dataset.creation.features.BuggyMethodExtractor.BuggyInfo;
+import dataset.creation.features.BuggyInfo;
 import dataset.creation.features.CsvGenerator;
 import dataset.creation.utils.CsvDeduplicator;
 import dataset.creation.utils.FinalCsvReducer;
 import dataset.creation.utils.PipelineUtils;
+import dataset.creation.features.MethodFeatures;
 
 import jakarta.json.bind.Jsonb;
 import jakarta.json.bind.JsonbBuilder;
@@ -29,7 +31,6 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import static dataset.creation.utils.PipelineUtils.DEFAULT_FILTERS;
 
 public class Main {
     public static final String DATASET ="dataset_";
@@ -39,8 +40,8 @@ public class Main {
     public static void main(String[] args) throws Exception {
         // ① Definisci qui i progetti da processare:
         List<ProjectConfig> projects = List.of(
-                new ProjectConfig("apache", "openjpa", "OPENJPA",
-                        "2.0.0", Map.of()),
+                //new ProjectConfig("apache", "openjpa", "OPENJPA",
+                //        "2.0.0", Map.of()),
                 new ProjectConfig("apache", "bookkeeper", "BOOKKEEPER",
                         "4.2.1", Map.of())
         );
@@ -120,15 +121,15 @@ public class Main {
         boolean first = true;
         for (String tag : releases) {
             LOG.info("   • elaboro {}@{}", cfg.repo(), tag);
-            Map<File, Map<String, FeatureExtractor.MethodFeatures>> feats;
+            Map<File, Map<String, MethodFeatures>> feats;
             if ("HEAD".equals(tag)) {
                 feats = PipelineUtils.walkAndExtract(
-                        repoDir.toFile(), fx, DEFAULT_FILTERS
+                        repoDir.toFile(), fx
                 );
             } else {
                 Path tmp = PipelineUtils.downloadAndUnzip(cfg.owner(), cfg.repo(), tag);
                 Path proj = PipelineUtils.findSingleSubdir(tmp);
-                feats = PipelineUtils.walkAndExtract(proj.toFile(), fx, DEFAULT_FILTERS);
+                feats = PipelineUtils.walkAndExtract(proj.toFile(), fx);
                 PipelineUtils.deleteDirectoryRecursively(tmp);
             }
             new CsvGenerator(tag, !first)
@@ -160,13 +161,14 @@ public class Main {
             Path cacheDir
     ) throws Exception {
         Path json = cacheDir.resolve(cfg.repo().toLowerCase() + "_jira_tickets.json");
-        Jsonb jb = JsonbBuilder.create(new JsonbConfig().withFormatting(true));
+        try (Jsonb jb = JsonbBuilder.create(new JsonbConfig().withFormatting(true))) {
 
-        if (Files.exists(json)) {
-            LOG.info("▶ Carico cache ticket da {}", json);
-            try (Reader r = Files.newBufferedReader(json, StandardCharsets.UTF_8)) {
-                Type t = new ArrayList<JiraTicket>() {}.getClass().getGenericSuperclass();
-                return (List<JiraTicket>) jb.fromJson(r, t);
+            if (Files.exists(json)) {
+                LOG.info("▶ Carico cache ticket da {}", json);
+                try (Reader r = Files.newBufferedReader(json, StandardCharsets.UTF_8)) {
+                    Type t = new TypeToken<List<JiraTicket>>(){}.getType();
+                    return jb.fromJson(r, t);
+                }
             }
         }
 
@@ -182,8 +184,9 @@ public class Main {
     private static void dumpJson(Path dir, String filename, Object data) throws Exception {
         Path file = dir.resolve(filename);
         try (Writer w = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-            Jsonb jsonb = JsonbBuilder.create(new JsonbConfig().withFormatting(true));
-            jsonb.toJson(data, w);
+            try (Jsonb jsonb = JsonbBuilder.create(new JsonbConfig().withFormatting(true))) {
+                jsonb.toJson(data, w);
+            }
         }
         LOG.info("✅ Dump salvato in {}", file);
     }

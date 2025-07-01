@@ -12,10 +12,12 @@ import com.google.gson.JsonElement;
 
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
+import dataset.creation.features.MethodFeatures;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -64,7 +66,7 @@ public final class PipelineUtils {
             FileSystems.getDefault().getPathMatcher("glob:**/*Benchmark.java");
 
     /** Array pubblico dei filtri da usare in walkAndExtract */
-    public static final PathMatcher[] DEFAULT_FILTERS = {
+    protected static final PathMatcher[] DEFAULT_FILTERS = {
             TEST_DIR_MATCHER, TEST_CLASS_MATCHER, MAIN_TESTS_DIR_MATCHER,
             IGNORE_MATCHER,
             DEMO_DIR_MATCHER, DEMO_CLASS_MATCHER,
@@ -121,14 +123,21 @@ public final class PipelineUtils {
              InputStream in = resp.body().byteStream();
              ZipInputStream zip = new ZipInputStream(in)) {
 
-            ZipEntry e;
-            while ((e = zip.getNextEntry()) != null) {
-                Path out = tmp.resolve(e.getName());
-                if (e.isDirectory())
-                    Files.createDirectories(out);
-                else {
-                    Files.createDirectories(out.getParent());
-                    Files.copy(zip, out);
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                // Normalizza il percorso e previene Zip Slip
+                Path normalized = tmp.resolve(entry.getName()).normalize();
+                if (!normalized.startsWith(tmp)) {
+                    throw new IOException("Invalid ZIP entry: " + entry.getName());
+                }
+
+                if (entry.isDirectory()) {
+                    Files.createDirectories(normalized);
+                } else {
+                    Files.createDirectories(normalized.getParent());
+                    try (OutputStream out = Files.newOutputStream(normalized)) {
+                        zip.transferTo(out);
+                    }
                 }
                 zip.closeEntry();
             }
@@ -161,15 +170,13 @@ public final class PipelineUtils {
      * Esegue un walk ricorsivo e applica i matcher di esclusione.
      * @param dir      root del progetto / modulo da analizzare
      * @param fx       extractor già istanziato
-     * @param filters  elenco di matcher da escludere (var-arg)
      */
-    public static Map<File, Map<String, FeatureExtractor.MethodFeatures>>
+    public static Map<File, Map<String, MethodFeatures>>
     walkAndExtract(File dir,
-                   FeatureExtractor fx,
-                   PathMatcher... filters) throws IOException {
+                   FeatureExtractor fx) throws IOException {
 
-        Collection<PathMatcher> ex = Arrays.asList(filters);
-        Map<File, Map<String, FeatureExtractor.MethodFeatures>> out = new HashMap<>();
+        Collection<PathMatcher> ex = Arrays.asList(DEFAULT_FILTERS);
+        Map<File, Map<String, MethodFeatures>> out = new HashMap<>();
 
         try (Stream<Path> ps = Files.walk(dir.toPath())) {
             ps.filter(Files::isRegularFile)

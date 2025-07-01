@@ -40,8 +40,8 @@ public class Main {
     public static void main(String[] args) throws Exception {
         // ① Definisci qui i progetti da processare:
         List<ProjectConfig> projects = List.of(
-                //new ProjectConfig("apache", "openjpa", "OPENJPA",
-                //        "2.0.0", Map.of()),
+                new ProjectConfig("apache", "openjpa", "OPENJPA",
+                        "2.0.0", Map.of()),
                 new ProjectConfig("apache", "bookkeeper", "BOOKKEEPER",
                         "4.2.1", Map.of())
         );

@@ -1,13 +1,6 @@
 package dataset.creation.utils;
 
 import dataset.creation.features.FeatureExtractor;
-import dataset.creation.fetcher.Fetcher;
-import dataset.creation.fetcher.model.JiraTicket;
-
-import jakarta.json.bind.Jsonb;
-import jakarta.json.bind.JsonbBuilder;
-import jakarta.json.bind.JsonbConfig;
-
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -23,9 +16,6 @@ import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.Reader;
-import java.lang.reflect.Type;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -214,32 +204,5 @@ public final class PipelineUtils {
             if (ai != bi) return Integer.compare(ai, bi);
         }
         return 0;
-    }
-
-    /* =========================================================
-       JIRA TICKETS CACHE
-       ========================================================= */
-
-    /** Legge da cache o scarica da JIRA tutti i ticket. */
-    public static List<JiraTicket> loadOrDownloadTickets(Fetcher f) throws Exception {
-        String base = f.getClass().getSimpleName().equals("BookkeeperFetcher")
-                ? "bookkeeper"
-                : f.getClass().getSimpleName().toLowerCase();
-        Path json = Paths.get(base + "_jira_tickets.json");
-
-        Jsonb jb = JsonbBuilder.create(new JsonbConfig().withFormatting(true));
-        if (Files.exists(json)) {
-            try (Reader r = Files.newBufferedReader(json, StandardCharsets.UTF_8)) {
-                Type t = new ArrayList<JiraTicket>() {}.getClass().getGenericSuperclass();
-                //noinspection unchecked
-                return (List<JiraTicket>) jb.fromJson(r, t);
-            }
-        }
-
-        List<JiraTicket> ts = f.fetchAllJiraTickets(
-                System.getenv("JIRA_USER"), System.getenv("JIRA_PASS")
-        );
-        f.writeTicketsToJsonFile(ts, Path.of(json.toString()));
-        return ts;
     }
 }

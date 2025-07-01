@@ -56,8 +56,6 @@ public final class PipelineUtils {
             FileSystems.getDefault().getPathMatcher("glob:**/src/main/java/tests/**");
     public static final PathMatcher IGNORE_MATCHER         =
             FileSystems.getDefault().getPathMatcher("glob:**/{target,build,generated-sources}/**");
-    public static final PathMatcher DTO_IGNORE             =
-            FileSystems.getDefault().getPathMatcher("glob:**/{dto,model}/**");
     public static final PathMatcher DEMO_DIR_MATCHER       =
             FileSystems.getDefault().getPathMatcher("glob:**/{demo,sample,example}/**");
     public static final PathMatcher DEMO_CLASS_MATCHER     =
@@ -78,7 +76,7 @@ public final class PipelineUtils {
     /** Array pubblico dei filtri da usare in walkAndExtract */
     public static final PathMatcher[] DEFAULT_FILTERS = {
             TEST_DIR_MATCHER, TEST_CLASS_MATCHER, MAIN_TESTS_DIR_MATCHER,
-            IGNORE_MATCHER, DTO_IGNORE,
+            IGNORE_MATCHER,
             DEMO_DIR_MATCHER, DEMO_CLASS_MATCHER,
             MOCK_DIR_MATCHER, MOCK_CLASS_MATCHER, STUB_CLASS_MATCHER, TESTDATA_CLASS_MATCHER,
             BENCH_DIR_MATCHER, BENCH_CLASS_MATCHER

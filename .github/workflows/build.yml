@@ -33,4 +33,4 @@ jobs:
       - name: Build and analyze
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=kuro1999_isw2_dataset
+        run: cd it.marchionni mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=kuro1999_isw2_dataset -Dsonar.organization=kuro1999 -Dsonar.host.url=https://sonarcloud.io -Dsonar.login=${SONAR_TOKEN}

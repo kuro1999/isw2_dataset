@@ -1,36 +1,62 @@
-name: SonarQube
+name: SonarCloud CI
+
 on:
   push:
     branches:
       - master
   pull_request:
     types: [opened, synchronize, reopened]
+
 jobs:
-  build:
-    name: Build and analyze
+  build-and-analyze:
+    name: Build & SonarCloud
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      # 1) Checkout completo (fetch-depth: 0 per analisi PR)
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+          fetch-depth: 0
+
+      # 2) JDK 11
       - name: Set up JDK 11
         uses: actions/setup-java@v4
         with:
+          distribution: 'zulu'
           java-version: 11
-          distribution: 'zulu' # Alternative distribution options are available.
-      - name: Cache SonarQube packages
+
+      # 3) Cache per il SonarScanner
+      - name: Cache SonarCloud scanner
         uses: actions/cache@v4
         with:
           path: ~/.sonar/cache
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
+
+      # 4) Cache per le dipendenze Maven
       - name: Cache Maven packages
         uses: actions/cache@v4
         with:
-          path: it.marchionni/pom.xml
+          # qui la cartella locale dove Maven scarica le librerie
+          path: ~/.m2/repository
+          # invalidiamo quando cambia QUALSIASI pom.xml
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
           restore-keys: ${{ runner.os }}-m2
-      - name: Build and analyze
+
+      # 5) Build e test
+      - name: Build & Test
+        # facciamo il mvn dentro it.marchionni
+        working-directory: it.marchionni
+        run: mvn clean verify --batch-mode
+
+      # 6) SonarCloud analysis
+      - name: SonarCloud Scan
+        working-directory: it.marchionni
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: cd it.marchionni mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=kuro1999_isw2_dataset -Dsonar.organization=kuro1999 -Dsonar.host.url=https://sonarcloud.io -Dsonar.login=${SONAR_TOKEN}
+        run: mvn sonar:sonar \
+          -Dsonar.projectKey=kuro1999_isw2_dataset \
+          -Dsonar.organization=kuro1999 \
+          -Dsonar.host.url=https://sonarcloud.io \
+          -Dsonar.login=${{ env.SONAR_TOKEN }}

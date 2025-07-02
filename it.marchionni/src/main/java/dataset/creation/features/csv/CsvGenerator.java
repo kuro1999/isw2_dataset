@@ -48,17 +48,7 @@ public class CsvGenerator {
             String outputCsv
     ) throws CsvGeneratorException {
 
-        String[] headers = append ? null : new String[]{
-                "Version","File Name","Method Name",
-                "LOC","CognitiveComplexity","CyclomaticComplexity",
-                "CodeSmells","NestingDepth","ParameterCount",
-                "ChurnTotal","AvgAdded","MaxAdded","AvgDeleted","MaxDeleted",
-                "AvgChurn","MaxChurn","ElseAdded","ElseDeleted","CondChanges",
-                "DecisionPoints","Histories","Authors","Buggy"
-        };
-        CSVFormat.Builder builder = CSVFormat.DEFAULT.builder();
-        if (!append) builder.setHeader(headers);
-        CSVFormat fmt = builder.build();
+        CSVFormat fmt = getCsvFormat();
 
         try (CSVPrinter csv = new CSVPrinter(new FileWriter(outputCsv, append), fmt)) {
             // Prepara insieme dei buggy-id
@@ -85,6 +75,21 @@ public class CsvGenerator {
         } catch (IOException e) {
             throw new CsvGeneratorException("Errore generazione CSV in " + outputCsv, e);
         }
+    }
+
+    private CSVFormat getCsvFormat() {
+        String[] headers = append ? null : new String[]{
+                "Version","File Name","Method Name",
+                "LOC","CognitiveComplexity","CyclomaticComplexity",
+                "CodeSmells","NestingDepth","ParameterCount",
+                "ChurnTotal","AvgAdded","MaxAdded","AvgDeleted","MaxDeleted",
+                "AvgChurn","MaxChurn","ElseAdded","ElseDeleted","CondChanges",
+                "DecisionPoints","Histories","Authors","Buggy"
+        };
+        CSVFormat.Builder builder = CSVFormat.DEFAULT.builder();
+        if (!append) builder.setHeader(headers);
+        CSVFormat fmt = builder.build();
+        return fmt;
     }
 
     /**

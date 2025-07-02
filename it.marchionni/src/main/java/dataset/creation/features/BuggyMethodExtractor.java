@@ -3,7 +3,7 @@ package dataset.creation.features;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.MethodDeclaration;;
-import dataset.creation.fetcher.model.JiraTicket;
+import dataset.creation.fetcher.jira.JiraTicket;
 import jakarta.json.bind.Jsonb;
 import jakarta.json.bind.JsonbBuilder;
 import com.github.javaparser.Range;

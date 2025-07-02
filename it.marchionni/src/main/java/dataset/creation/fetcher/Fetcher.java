@@ -1,7 +1,11 @@
 package dataset.creation.fetcher;
 
-import dataset.creation.fetcher.model.JiraTicket;
-import dataset.creation.fetcher.model.JiraVersion;
+import dataset.creation.fetcher.fields.FieldWithName;
+import dataset.creation.fetcher.fields.Fields;
+import dataset.creation.fetcher.fields.User;
+import dataset.creation.fetcher.jira.JiraSearchIssue;
+import dataset.creation.fetcher.jira.JiraSearchResponse;
+import dataset.creation.fetcher.jira.JiraTicket;
 import jakarta.json.bind.Jsonb;
 import jakarta.json.bind.JsonbBuilder;
 import jakarta.json.bind.JsonbConfig;
@@ -20,7 +24,6 @@ import java.util.Objects;
 
 public class Fetcher {
     private static final String JIRA_SEARCH_API   = "https://issues.apache.org/jira/rest/api/2/search";
-    private static final String JIRA_VERSIONS_API = "https://issues.apache.org/jira/rest/api/2/project/%s/versions";
 
     private final OkHttpClient client;
     private final Jsonb jsonb;
@@ -37,7 +40,9 @@ public class Fetcher {
      */
     public List<JiraTicket> fetchAllJiraTickets(String user, String pwd) throws IOException {
         List<JiraTicket> tickets = new ArrayList<>();
-        int startAt = 0, pageSize = 500, total;
+        int startAt = 0;
+        int pageSize = 500;
+        int total;
         String jql = String.format("project = %s ORDER BY created ASC", jiraProject);
 
         do {
@@ -53,8 +58,8 @@ public class Fetcher {
             try (Response resp = client.newCall(request).execute()) {
                 validateResponse(resp);
                 JiraSearchResponse sr = jsonb.fromJson(resp.body().string(), JiraSearchResponse.class);
-                total = sr.total;
-                sr.issues.forEach(issue -> tickets.add(mapIssue(issue)));
+                total = sr.getTotal();
+                sr.getIssues().forEach(issue -> tickets.add(mapIssue(issue)));
             }
             startAt += pageSize;
         } while (startAt < total);
@@ -67,22 +72,6 @@ public class Fetcher {
      */
     public void writeTicketsToJsonFile(List<JiraTicket> tickets, Path filePath) throws IOException {
         Files.writeString(filePath, jsonb.toJson(tickets));
-    }
-
-    /**
-     * Recupera tutte le versioni del progetto configurato.
-     */
-    public List<JiraVersion> fetchProjectVersions(String user, String pwd) throws IOException {
-        String apiUrl = String.format(JIRA_VERSIONS_API, jiraProject);
-        Request request = buildAuthenticatedRequest(user, pwd, HttpUrl.parse(apiUrl)).build();
-
-        try (Response resp = client.newCall(request).execute()) {
-            validateResponse(resp);
-            return jsonb.fromJson(
-                    resp.body().string(),
-                    new ArrayList<JiraVersion>(){}.getClass().getGenericSuperclass()
-            );
-        }
     }
 
     // ====================== METODI PRIVATI ======================
@@ -106,17 +95,17 @@ public class Fetcher {
 
     private static JiraTicket mapIssue(JiraSearchIssue si) {
         JiraTicket t = new JiraTicket();
-        Fields f = si.fields;
+        Fields f = si.getFields();
 
-        t.setKey(si.key);
-        t.setSummary(f.summary);
-        t.setDescription(f.description);
-        t.setStatus(getSafeName(f.status));
-        t.setIssueType(getSafeName(f.issuetype));
-        t.setPriority(getSafeName(f.priority));
-        t.setReporter(getSafeDisplayName(f.reporter));
-        t.setAssignee(getSafeDisplayName(f.assignee));
-        t.setResolution(getSafeName(f.resolution));
+        t.setKey(si.getKey());
+        t.setSummary(f.getSummary());
+        t.setDescription(f.getDescription());
+        t.setStatus(getSafeName(f.getStatus()));
+        t.setIssueType(getSafeName(f.getIssuetype()));
+        t.setPriority(getSafeName(f.getPriority()));
+        t.setReporter(getSafeDisplayName(f.getReporter()));
+        t.setAssignee(getSafeDisplayName(f.getAssignee()));
+        t.setResolution(getSafeName(f.getResolution()));
 
         // Aggiungi qui altri campi se necessario (es. date, fixVersions, etc.)
         return t;
@@ -129,43 +118,6 @@ public class Fetcher {
     }
 
     public static String getSafeDisplayName(User user) {
-        return user != null ? user.displayName : null;
+        return user != null ? user.getDisplayName() : null;
     }
-
-    // ====================== CLASSI INTERNE PER PARSING JSON ======================
-
-    // Cambia da private a public tutte queste classi:
-    public static class JiraSearchResponse {
-        public int total;
-        public List<JiraSearchIssue> issues;
-
-        public JiraSearchResponse() {} // Aggiungi questo
-    }
-
-    public static class JiraSearchIssue {
-        public String key;
-        public Fields fields;
-
-        public JiraSearchIssue() {}
-    }
-
-    public static class Fields {
-        public String summary;
-        public String description;
-        public Status status;
-        public IssueType issuetype;
-        public Priority priority;
-        public User reporter;
-        public User assignee;
-        public Resolution resolution;
-
-        public Fields() {} // Aggiungi questo
-    }
-
-    public interface FieldWithName { String getName(); }
-    public static class Status implements FieldWithName { public String name; public String getName() { return name; } }
-    public static class IssueType implements FieldWithName { public String name; public String getName() { return name; } }
-    public static class Priority implements FieldWithName { public String name; public String getName() { return name; } }
-    public static class Resolution implements FieldWithName { public String name; public String getName() { return name; } }
-    public static class User { public String displayName; }
 }

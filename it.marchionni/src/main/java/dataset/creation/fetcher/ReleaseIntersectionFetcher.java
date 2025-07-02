@@ -1,7 +1,7 @@
 package dataset.creation.fetcher;
 
 import dataset.creation.fetcher.model.Release;
-import dataset.creation.fetcher.model.JiraVersion;
+import dataset.creation.fetcher.jira.JiraVersion;
 
 import java.io.File;
 import java.time.LocalDate;

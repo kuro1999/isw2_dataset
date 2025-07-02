@@ -1,4 +1,4 @@
-package dataset.creation.fetcher.model;
+package dataset.creation.fetcher.jira;
 
 import java.time.LocalDate;
 

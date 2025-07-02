@@ -1,6 +1,6 @@
 package dataset.creation.fetcher;
 
-import dataset.creation.fetcher.model.JiraVersion;
+import dataset.creation.fetcher.jira.JiraVersion;
 import jakarta.json.*;
 import jakarta.json.bind.Jsonb;
 import jakarta.json.bind.JsonbBuilder;

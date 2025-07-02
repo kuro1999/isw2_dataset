@@ -52,7 +52,4 @@ public class Release {
 
     public LocalDate getReleaseDate() { return releaseDate; }
     public void setReleaseDate(LocalDate releaseDate) { this.releaseDate = releaseDate; }
-
-    /* opzionale: nome “umano” se lo usi altrove */
-    public String getReleaseName() { return tag; }
 }

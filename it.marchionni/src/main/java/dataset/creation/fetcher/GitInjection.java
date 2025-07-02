@@ -18,27 +18,24 @@ import java.time.ZoneOffset;
 import java.util.*;
 
 /**
- * Clona (o apre) il repo Git di BookKeeper, deduplica i commit di tutti
- * i branch e li assegna alla release successiva in ordine cronologico.
- *
- * Ogni {@link Release} mantiene internamente una commitList, quindi
- * {@code getCommitCount()} restituisce la numerosità senza
- * serializzare l'intero elenco.
+ * Clona (o apre) il repo Git, deduplica i commit di tutti i branch
+ * e li assegna alla release successiva in ordine cronologico.
  */
 public class GitInjection {
 
     private static final Logger log = LoggerFactory.getLogger(GitInjection.class);
 
-    /** rimane per compatibilità con altre classi che lo importano */
     public static final String LOCAL_DATE_FORMAT = "yyyy-MM-dd";
 
-    private final Git git;
-    private final Repository repo;
+    private final Git         git;
+    private final Repository  repo;
     private final List<Release> releases;
-    private List<Commit> commits;
+    private       List<Commit> commits;
 
+    /* --------------------------------------------------------------- */
     public GitInjection(String remoteUrl, File workDir, List<Release> releases)
             throws GitInjectionException {
+
         this.releases = releases;
         try {
             if (workDir.exists()) {
@@ -53,59 +50,68 @@ public class GitInjection {
                         .call();
             }
             repo = git.getRepository();
+
         } catch (Exception e) {
             throw new GitInjectionException(
                     "Errore inizializzazione GitInjection per URL: " + remoteUrl, e);
         }
     }
 
-
+    /* --------------------------------------------------------------- */
     public void injectCommits() throws GitInjectionException {
         try {
-            // 1. raccolta e ordinamento
             List<RevCommit> revCommits = collectUniqueSortedCommits();
-            // 2. assegnazione alle release
             assignCommitsToReleases(revCommits);
-            // 3+4. pulizia, id progressivi e log finale
             finalizeReleasesAndLog();
         } catch (Exception e) {
             throw new GitInjectionException("Errore durante injectCommits()", e);
         }
     }
 
+    /* --------------------------------------------------------------- */
     private List<RevCommit> collectUniqueSortedCommits() throws GitInjectionException {
         try {
-            List<RevCommit> revCommits = new ArrayList<>();
+            List<RevCommit> result = new ArrayList<>();
+
             for (Ref br : git.branchList()
                     .setListMode(ListBranchCommand.ListMode.ALL)
                     .call()) {
 
                 for (RevCommit rc : git.log().add(repo.resolve(br.getName())).call()) {
-                    if (!revCommits.contains(rc)) {
-                        revCommits.add(rc);
+                    if (!result.contains(rc)) {
+                        result.add(rc);
                     }
                 }
             }
-            revCommits.sort(Comparator.comparing(
-                    rc -> rc.getCommitterIdent().getWhenAsInstant()));
-            log.info("→ {} commit unici trovati", revCommits.size());
-            return revCommits;
-        }catch (Exception e) {
-            throw  new GitInjectionException("Errore durante collectUniqueSortedCommits()", e);
+            result.sort(Comparator.comparing(rc -> rc.getCommitterIdent()
+                    .getWhenAsInstant()));
+
+            log.info("→ {} commit unici trovati", result.size());
+            return result;
+
+        } catch (Exception e) {
+            throw new GitInjectionException("Errore durante la raccolta dei commit", e);
         }
     }
 
+    /* --------------------------------------------------------------- */
     private void assignCommitsToReleases(List<RevCommit> revCommits) {
+
         commits = new ArrayList<>();
+
         for (RevCommit rc : revCommits) {
-            LocalDate commitDate = toUtcLocalDate(
-                    rc.getCommitterIdent().getWhenAsInstant());
+            LocalDate commitDate = toUtcLocalDate(rc.getCommitterIdent()
+                    .getWhenAsInstant());
             LocalDate lower = LocalDate.MIN;
 
             for (Release rel : releases) {
+
                 LocalDate relDate = rel.getReleaseDate();
                 if (commitDate.isAfter(lower) && !commitDate.isAfter(relDate)) {
+
+                    /* rel implementa ReleaseInfo → nessuna dipendenza circolare */
                     Commit c = new Commit(rc, rel);
+
                     commits.add(c);
                     rel.addCommit(c);
                 }
@@ -114,36 +120,33 @@ public class GitInjection {
         }
     }
 
+    /* --------------------------------------------------------------- */
     private void finalizeReleasesAndLog() {
-        // rimuovi release vuote e assegna id
+
+        // rimuove release senza commit e assegna id progressivi
         releases.removeIf(r -> r.getCommitList().isEmpty());
         int id = 0;
         for (Release r : releases) {
             r.setId(++id);
         }
-        // ordina commits
+
+        // ordina commit per data
         commits.sort(Comparator.comparing(c ->
                 c.getRevCommit().getCommitterIdent().getWhenAsInstant()));
-        // log riepilogo
-        log.info("→ assegnati {} commit a {} release",
-                commits.size(), releases.size());
+
+        // log riepilogativo
+        log.info("→ assegnati {} commit a {} release", commits.size(), releases.size());
         for (Release r : releases) {
-            log.info("   • {} : {} commit",
-                    r.getTag(), r.getCommitCount());
+            log.info("   • {} : {} commit", r.getTag(), r.getCommitCount());
         }
     }
 
-
-    /** Helper: Instant → LocalDate (UTC) */
+    /* --------------------------------------------------------------- */
     private static LocalDate toUtcLocalDate(Instant inst) {
         return inst.atZone(ZoneOffset.UTC).toLocalDate();
     }
 
-    /** Getter pubblici */
-    public List<Commit> getCommits() {
-        return commits;
-    }
-    public List<Release> getReleases() {
-        return releases;
-    }
+    /* ---------------- getter pubblici ------------------------------ */
+    public List<Commit>  getCommits()  { return commits; }
+    public List<Release> getReleases() { return releases; }
 }

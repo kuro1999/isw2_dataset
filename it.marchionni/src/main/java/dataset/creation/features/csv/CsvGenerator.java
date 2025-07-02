@@ -31,6 +31,7 @@ public class CsvGenerator {
     private final String version;
     private final boolean append;
 
+
     public CsvGenerator(String version, boolean append) {
         this.version = version;
         this.append = append;

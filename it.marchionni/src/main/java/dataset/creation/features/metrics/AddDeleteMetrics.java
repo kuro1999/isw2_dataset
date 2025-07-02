@@ -1,5 +1,8 @@
 package dataset.creation.features.metrics;
 
+import jakarta.json.bind.annotation.JsonbCreator;
+import jakarta.json.bind.annotation.JsonbProperty;
+
 // 4. Metriche di add/delete
 public class AddDeleteMetrics {
     private double avgAdded;
@@ -7,11 +10,17 @@ public class AddDeleteMetrics {
     private double avgDeleted;
     private int maxDeleted;
 
-    public AddDeleteMetrics(double avgAdded, int maxAdded, double avgDeleted, int maxDeleted) {
-        this.avgAdded    = avgAdded;
-        this.maxAdded    = maxAdded;
-        this.avgDeleted  = avgDeleted;
-        this.maxDeleted  = maxDeleted;
+    @JsonbCreator
+    public AddDeleteMetrics(
+            @JsonbProperty("avgAdded")   double avgAdded,
+            @JsonbProperty("maxAdded")   int    maxAdded,
+            @JsonbProperty("avgDeleted") double avgDeleted,
+            @JsonbProperty("maxDeleted") int    maxDeleted
+    ) {
+        this.avgAdded   = avgAdded;
+        this.maxAdded   = maxAdded;
+        this.avgDeleted = avgDeleted;
+        this.maxDeleted = maxDeleted;
     }
     public double getAvgAdded() {
         return avgAdded;

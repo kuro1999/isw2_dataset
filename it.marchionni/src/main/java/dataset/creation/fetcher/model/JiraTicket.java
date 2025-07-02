@@ -51,7 +51,9 @@ public class JiraTicket {
     private List<Worklog> worklogs      = new ArrayList<>();
 
     /* costruttore vuoto per JSON-B */
-    public JiraTicket() {}
+    public JiraTicket() {
+        //empty
+    }
 
     /* ---------- getter & setter ---------- */
     public String getKey() { return key; }

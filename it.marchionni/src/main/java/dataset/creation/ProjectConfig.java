@@ -8,7 +8,7 @@ public final class ProjectConfig {
     private final String owner;
     private final String repo;
     private final String jiraProject;
-    private final String releaseCut;   // può essere null
+    private final String releaseCut;
     private final Map<String,String> extraEnv;
 
     public ProjectConfig(String owner,
@@ -20,7 +20,7 @@ public final class ProjectConfig {
         this.owner       = Objects.requireNonNull(owner);
         this.repo        = Objects.requireNonNull(repo);
         this.jiraProject = Objects.requireNonNull(jiraProject);
-        this.releaseCut  = releaseCut;               // nullable
+        this.releaseCut  = releaseCut;
         this.extraEnv   = extraEnv == null ? Map.of() : extraEnv;
     }
 

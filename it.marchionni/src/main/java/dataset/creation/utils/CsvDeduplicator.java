@@ -15,22 +15,22 @@ import java.nio.file.Path;
 import java.util.*;
 
 /**
- * Raccolta di utility per la post‑elaborazione dei CSV prodotti dal dataset
+ * Raccolta di utility per la post-elaborazione dei CSV prodotti dal dataset
  * creator.
  * <ul>
- *   <li><b>deduplicate</b> – rimuove le righe completamente identiche
+ *   <li><b>deduplicate</b> – rimuove le righe completamente identiche
  *       (stesso valore in <em>tutte</em> le colonne), mantenendo la prima
  *       occorrenza per preservare l’ordinamento originale.</li>
- *   <li><b>dedupAndFilterUpTo</b> – esegue la deduplicazione e, in più,
+ *   <li><b>dedupAndFilterUpTo</b> – esegue la deduplicazione e, in più,
  *       scarta ogni record con la colonna <code>Version</code> che indica
  *       una release successiva a quella specificata (confronto semantico,
  *       prefissi «v»/«release-» ignorati). Utile, ad esempio, per fermarsi
- *       alla 4.2.1.</li>
+ *       alla 4.2.1.</li>
  * </ul>
  * <p>La classe è pensata per essere richiamata direttamente dal codice Java
  * (o da uno script build/CI); non contiene più un <code>main</code> perché la
  * logica CLI è stata spostata altrove.</p>
- * <p><b>Compatibile con Java 11.</b></p>
+ * <p><b>Compatibile con Java 11.</b></p>
  */
 public class CsvDeduplicator {
 
@@ -49,12 +49,7 @@ public class CsvDeduplicator {
      * @throws IOException problemi di I/O lettura/scrittura
      */
     public static void deduplicate(Path input, Path output) throws IOException {
-        transform(input, output, new RowPredicate() {
-            @Override
-            public boolean test(CSVRecord rec) {
-                return true; // nessun filtro sulla versione
-            }
-        });
+        transform(input, output, rec -> true);
     }
 
 
@@ -74,12 +69,7 @@ public class CsvDeduplicator {
      */
     public static void dedupAndFilterUpTo(Path input, Path output, final String stopRelease) throws IOException {
         log.info("🚧 Filtro fino alla release {} (inclusa)", stopRelease);
-        transform(input, output, new RowPredicate() {
-            @Override
-            public boolean test(CSVRecord rec) {
-                return compareSemver(rec.get("Version"), stopRelease) <= 0;
-            }
-        });
+        transform(input, output, rec -> compareSemver(rec.get("Version"), stopRelease) <= 0);
     }
 
 
@@ -94,17 +84,26 @@ public class CsvDeduplicator {
     private static void transform(Path input, Path output, RowPredicate keep) throws IOException {
         log.info("✍️  Elaboro {} → {}", input.toAbsolutePath(), output.toAbsolutePath());
 
+        // 1) Configuro il formato per il parser usando il nuovo builder (removendo i metodi deprecati)
+        CSVFormat parserFormat = CSVFormat.DEFAULT.builder()
+                .setHeader()               // legge la prima riga come header
+                .setSkipHeaderRecord(true) // non include l’header nei record
+                .setTrim(true)             // rimuove spazi ad inizio/fine campo
+                .build();
+
         try (Reader reader = Files.newBufferedReader(input);
-             CSVParser parser = CSVFormat.DEFAULT
-                     .withFirstRecordAsHeader()
-                     .withTrim()
-                     .parse(reader)) {
+             CSVParser parser = CSVParser.parse(reader, parserFormat)) {
 
             List<String> header = new ArrayList<>(parser.getHeaderMap().keySet());
-            Set<String>  seen   = new LinkedHashSet<>(); // mantiene l’ordine di inserimento
+            Set<String> seen   = new LinkedHashSet<>(); // mantiene l’ordine di inserimento
+
+            // 2) Configuro il formato per il printer usando il builder
+            CSVFormat printerFormat = CSVFormat.DEFAULT.builder()
+                    .setHeader(header.toArray(new String[0])) // imposta header manuale
+                    .build();
 
             try (Writer writer = Files.newBufferedWriter(output);
-                 CSVPrinter printer = new CSVPrinter(writer, CSVFormat.DEFAULT.withHeader(header.toArray(new String[0])))) {
+                 CSVPrinter printer = new CSVPrinter(writer, printerFormat)) {
 
                 for (CSVRecord rec : parser) {
                     if (!keep.test(rec)) {

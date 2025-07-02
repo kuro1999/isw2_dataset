@@ -1,5 +1,8 @@
 package dataset.creation.features.metrics;
 
+import jakarta.json.bind.annotation.JsonbCreator;
+import jakarta.json.bind.annotation.JsonbProperty;
+
 // 1. Metriche sui cambi strutturali
 public class StructuralChangeMetrics {
     private int churn;
@@ -7,11 +10,17 @@ public class StructuralChangeMetrics {
     private int maxChurn;
     private int condChanges;
 
-    public StructuralChangeMetrics(int churn, double avgChurn, int maxChurn, int condChanges) {
-        this.churn        = churn;
-        this.avgChurn     = avgChurn;
-        this.maxChurn     = maxChurn;
-        this.condChanges  = condChanges;
+    @JsonbCreator
+    public StructuralChangeMetrics(
+            @JsonbProperty("churn")       int churn,
+            @JsonbProperty("avgChurn")    double avgChurn,
+            @JsonbProperty("maxChurn")    int maxChurn,
+            @JsonbProperty("condChanges") int condChanges
+    ) {
+        this.churn       = churn;
+        this.avgChurn    = avgChurn;
+        this.maxChurn    = maxChurn;
+        this.condChanges = condChanges;
     }
 
     public int getChurn() {

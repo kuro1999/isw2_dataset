@@ -88,8 +88,7 @@ public class CsvGenerator {
         };
         CSVFormat.Builder builder = CSVFormat.DEFAULT.builder();
         if (!append) builder.setHeader(headers);
-        CSVFormat fmt = builder.build();
-        return fmt;
+        return builder.build();
     }
 
     /**
